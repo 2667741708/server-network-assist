@@ -7,7 +7,7 @@ OUT=ROOT/'artifacts/project-deployment'
 OUT.mkdir(parents=True,exist_ok=True)
 site=OUT/'site'
 if site.exists():
-    if site.resolve() != (ROOT/'artifacts/project-deployment/site').absolute() or site.is_symlink():
+    if site.resolve() != ROOT.resolve()/'artifacts/project-deployment/site' or site.is_symlink():
         raise ValueError('Unexpected staging directory')
     shutil.rmtree(site)
 shutil.copytree(ROOT/'docs/projects',site)

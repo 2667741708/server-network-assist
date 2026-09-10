@@ -155,7 +155,7 @@ def build():
     # Retain an explicit manifest; deployment uses only this generated tree.
     (output/'manifest.json').write_text(json.dumps({'projects':count,'tutorials':tutorials,'paths':[s+'/' for s in slugs],'synced_at':catalog['synced_at']},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     # Replace only our generated tree. Removed/private repositories must not leave live pages behind.
-    if OUT.resolve() != (ROOT/'docs/projects').absolute() or OUT.is_symlink():
+    if OUT.resolve() != ROOT.resolve()/'docs/projects' or OUT.is_symlink():
         raise ValueError('Refusing to replace an unexpected output path')
     if OUT.exists():
         if not (OUT/'manifest.json').is_file():
