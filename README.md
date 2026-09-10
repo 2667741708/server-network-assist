@@ -23,23 +23,71 @@
 
 完整安装、升级及使用方式见 [桌面面板指南](docs/DESKTOP.md)。
 
+## 使用案例与截图
+
+下面三个案例来自本项目的使用场景。截图由当前程序界面配合**演示数据**生成，不是生产服务器实录；主机名、地址、流量和延迟均为示例，不代表性能测试结果。`192.0.2.x` 是文档示例地址，实际部署请替换为自己的地址。点击截图可查看原图。
+
+| 你的需求 | 使用入口 | 操作说明 |
+| --- | --- | --- |
+| Windows 浏览器打不开网页，但 WSL 可以联网 | 本机桌面面板 → 系统代理 | [案例一](#案例一windows-原生应用的代理故障排查) |
+| Ubuntu 出口机为 Windows 和 Ubuntu 客户端提供网络 | 服务器管理台 → 网络借助 | [案例二](#案例二一台-ubuntu-出口机服务两种系统) |
+| 在桌面查看连接、流量、握手并控制已有隧道 | “服务器网络助手”快捷方式 | [案例三](#案例三从桌面查看和控制已有隧道) |
+
+### 案例一：Windows 原生应用的代理故障排查
+
+我们在 Windows/WSL 混合环境中遇到过：WSL 能联网，Windows 应用却访问失败，原因是 Windows 用户仍启用了失效的本地手动代理。这是其中一种原因，不能仅凭 WSL 能联网就判断所有 Windows 故障都是代理问题。
+
+1. 双击“服务器网络助手”，点击“刷新状态”，同时检查“直连公网”和“系统应用联网”。
+2. 如下图，直连可用、系统应用不可用，且手动代理指向 `127.0.0.1:7897`，应检查对应代理服务是否仍在运行。隧道显示“已连接”并不等于应用一定可以联网。
+3. 如果已不需要手动代理，点击“关闭手动代理”。程序会先备份当前用户代理配置再关闭开关；不会删除 PAC 或代理软件自身的配置。
+4. 再次刷新，并在原先失败的 Windows 应用中重试。面板两项探测都变为“可用”后，还需确认目标网站或服务恢复。
+
+[![Windows 代理故障示例：直连可用，系统应用不可用，面板提示检查手动代理](docs/images/windows-proxy-diagnosis.png)](docs/images/windows-proxy-diagnosis.png)
+
+如果代理软件重新开启系统代理，请同步检查该软件。若直连也失败，继续排查出口、DNS 和路由，参见 [Windows 与 Ubuntu 兼容说明](docs/WINDOWS.md)。
+
+### 案例二：一台 Ubuntu 出口机服务两种系统
+
+适合实验室中“有一台 Ubuntu 可以上网，其他机器能通过 SSH 管理，但不能访问公网”的场景。Windows 客户端使用原生 WireGuard，Ubuntu 客户端使用 Linux 网络栈，Windows 不需要借助 WSL。
+
+| 示例角色 | 系统 | 管理地址 |
+| --- | --- | --- |
+| Ubuntu 出口机 | Ubuntu/Linux | `192.0.2.10` |
+| Windows 工作站 | Windows | `192.0.2.20` |
+| Ubuntu 计算节点 | Ubuntu/Linux | `192.0.2.30` |
+
+1. 在“主机与凭据”中添加三台主机，并通过可信渠道核对 SSH 指纹。进入“网络借助”，点击“探测全部主机”。
+2. 确认出口机公网可用、各节点 SSH 可达，并按指南安装辅助程序。Windows 客户端还需要原生 WireGuard 和管理员 SSH 账号。
+3. 创建方案，选择 Ubuntu 出口机及两个客户端，填写可达的出口地址、UDP 端口、无冲突的隧道网段，并保留 SSH/校园网等管理网络的路由。下图展示的是**待启用方案**，不表示已经完成联网验证。
+4. 启用方案并等待 SSH 与公网复检；失败会自动回退。Windows 还应检查“系统应用联网”，避免手动代理影响应用访问。
+5. 不再借网时，在管理台点击“断开并恢复原网络”，清理该方案的隧道和临时路由。
+
+[![Windows 和 Ubuntu 混合借网方案：三台主机的探测结果及待启用的方案设置](docs/images/mixed-network-profile.png)](docs/images/mixed-network-profile.png)
+
+出口机目前需要 Ubuntu/Linux，暂不支持 Windows 出口机。端口、防火墙、保留路由和自动回退的细节见 [网络借助指南](docs/NETWORK_ASSIST.md)。
+
+### 案例三：从桌面查看和控制已有隧道
+
+已经配置好 WireGuard 的机器，可以用桌面面板完成日常检查。它提供类似网络客户端的状态窗口；多主机管理和新建方案仍在服务器管理台完成。
+
+1. Windows 双击桌面快捷方式“服务器网络助手”；源码安装后也可运行 `server-network-assist-desktop`。Ubuntu/Linux 可使用同一命令，操作权限见 [桌面面板指南](docs/DESKTOP.md)。
+2. 查看两项联网探测、出口、最近握手和累计收发流量。流量是隧道当前运行周期的累计值，**不是实时网速**；面板每 30 秒自动刷新，也可手动刷新。
+
+[![桌面面板总览：公网探测、隧道流量、最近握手、系统代理和本机出口](docs/images/desktop-overview.png)](docs/images/desktop-overview.png)
+
+3. 点击“断开连接”会出现确认框；取消后保持连接，确认后停止选中的已有 WireGuard 服务。需要恢复时点击“连接”，原隧道配置和私钥保留。
+
+[![断开连接前的确认框，可选择取消或确认断开](docs/images/disconnect-confirmation.png)](docs/images/disconnect-confirmation.png)
+
+**关闭窗口不会断网。** 桌面连接开关只控制已有服务；要完整结束管理台创建的借网方案并清理临时路由，请使用管理台的“断开并恢复原网络”。当前桌面面板不包含 Clash 订阅、规则编辑或系统托盘菜单。
+
 ## 快速开始
 
 要求：Windows 或 Linux 管理节点、Python 3.11+。被管理主机需要 SSH。Ubuntu/Linux 借网节点需要 systemd、WireGuard、`iproute2` 和 `iptables`；Windows 客户端需要 WireGuard for Windows、PowerShell 5.1+ 和管理员 SSH 账号。Windows 出口机暂不支持。
 
-Windows 原生安装、代理故障定位与回退见 [Windows 与 Ubuntu 兼容说明](docs/WINDOWS.md)。下方 `v0.1.0` 发布包是旧版；本次 Windows 支持需要从当前源码安装。
+Windows 原生安装、代理故障定位与回退见 [Windows 与 Ubuntu 兼容说明](docs/WINDOWS.md)。`v0.1.0` 发布包是旧版，不包含当前 Windows 支持和桌面面板；体验本文功能请从当前源码安装。
 
-直接安装 `v0.1.0` 预发行 wheel：
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install https://github.com/2667741708/server-network-assist/releases/download/v0.1.0/server_network_assist-0.1.0-py3-none-any.whl
-server-network-assist init --data ./data
-server-network-assist serve --data ./data --bind 127.0.0.1 --port 9180
-```
-
-或者从源码安装：
+Ubuntu/Linux：
 
 ```bash
 git clone https://github.com/2667741708/server-network-assist.git
@@ -50,6 +98,19 @@ pip install .
 server-network-assist init --data ./data
 server-network-assist serve --data ./data --bind 127.0.0.1 --port 9180
 ```
+
+Windows PowerShell：
+
+```powershell
+git clone https://github.com/2667741708/server-network-assist.git
+cd server-network-assist
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\server-network-assist.exe init --data ./data
+.\.venv\Scripts\server-network-assist.exe serve --data ./data --bind 127.0.0.1 --port 9180
+```
+
+上面的命令启动服务器管理台。若要独立桌面窗口和 Windows 快捷方式，继续按 [桌面面板安装指南](docs/DESKTOP.md#windows-离线安装) 操作。
 
 首次账号保存在 `data/initial-login.json`，权限应保持为仅当前用户可读。登录并安全保存恢复密钥后，建议删除这个一次性交付文件。
 
