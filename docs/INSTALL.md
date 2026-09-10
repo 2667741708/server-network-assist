@@ -9,6 +9,18 @@
 
 ## 普通用户安装
 
+从 GitHub Release 安装固定版本：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install https://github.com/2667741708/server-network-assist/releases/download/v0.1.0/server_network_assist-0.1.0-py3-none-any.whl
+server-network-assist init --data ./data
+server-network-assist serve --data ./data
+```
+
+从源码安装：
+
 ```bash
 git clone https://github.com/2667741708/server-network-assist.git
 cd server-network-assist

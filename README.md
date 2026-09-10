@@ -20,6 +20,18 @@
 
 要求：Linux 管理节点、Python 3.11+。被管理主机需要 SSH；使用借网功能时还需要 systemd、WireGuard、`iproute2` 和 `iptables`。
 
+直接安装 `v0.1.0` 预发行 wheel：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install https://github.com/2667741708/server-network-assist/releases/download/v0.1.0/server_network_assist-0.1.0-py3-none-any.whl
+server-network-assist init --data ./data
+server-network-assist serve --data ./data --bind 127.0.0.1 --port 9180
+```
+
+或者从源码安装：
+
 ```bash
 git clone https://github.com/2667741708/server-network-assist.git
 cd server-network-assist
