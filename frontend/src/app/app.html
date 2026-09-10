@@ -1,0 +1,76 @@
+@if (busy() && !session()) {
+  <main class="splash">
+    <div class="brand-mark">↗</div>
+    <p>正在载入 Server Network Assist…</p>
+  </main>
+} @else if (!session()?.authenticated) {
+  <app-login [passkeys]="!!session()?.passkeys" (authenticated)="bootstrap()" />
+} @else {
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark small">↗</div>
+        <div><strong>Server Network</strong><span>Assist Console</span></div>
+      </div>
+      <nav aria-label="主导航">
+        @for (item of nav; track item[0]) {
+          <button [class.active]="page() === item[0]" (click)="navigate(item[0])">
+            <span aria-hidden="true">{{ item[2] }}</span
+            ><span>{{ item[1] }}</span>
+          </button>
+        }
+      </nav>
+      <div class="sidebar-foot">
+        <button mat-button (click)="refresh()">刷新数据</button
+        ><button mat-button (click)="logout()">退出登录</button>
+      </div>
+    </aside>
+    <main class="content-area">
+      @if (busy()) {
+        <mat-progress-bar mode="indeterminate" class="top-progress" />
+      }
+      @if (error()) {
+        <div class="alert error">{{ error() }}</div>
+      }
+      @switch (page()) {
+        @case ('overview') {
+          <app-overview
+            [hosts]="hosts()"
+            [profiles]="profiles()"
+            [probes]="probes()"
+            [navigate]="navigate"
+          />
+        }
+        @case ('hosts') {
+          <app-hosts [hosts]="hosts()" [credentials]="credentials()" (changed)="refresh()" />
+        }
+        @case ('network') {
+          <app-network
+            [hosts]="hosts()"
+            [profiles]="profiles()"
+            [probes]="probes()"
+            (changed)="refresh()"
+            (probesChanged)="probes.set($event)"
+          />
+        }
+        @case ('terminal') {
+          <app-terminal [hosts]="hosts()" />
+        }
+        @case ('settings') {
+          <app-settings [security]="security()" (changed)="refresh()" />
+        }
+        @case ('audit') {
+          <app-audit [events]="audit()" />
+        }
+      }
+    </main>
+    <nav class="mobile-nav" aria-label="移动端主导航">
+      @for (item of nav.slice(0, 5); track item[0]) {
+        <button [class.active]="page() === item[0]" (click)="navigate(item[0])">
+          <span>{{ item[2] }}</span
+          ><small>{{ item[1] }}</small>
+        </button>
+      }
+    </nav>
+  </div>
+}

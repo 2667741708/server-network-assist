@@ -1,0 +1,21 @@
+[Unit]
+Description=Server Network Assist web console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=server-network-assist
+Group=server-network-assist
+EnvironmentFile=-/etc/server-network-assist.env
+ExecStart=/opt/server-network-assist/venv/bin/server-network-assist serve --data /var/lib/server-network-assist --bind 127.0.0.1 --port 9180
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/server-network-assist
+
+[Install]
+WantedBy=multi-user.target

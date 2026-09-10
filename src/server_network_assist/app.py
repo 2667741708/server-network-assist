@@ -1,0 +1,767 @@
+"""Server Network Assist: authenticated HTTP/WebSocket and pinned SSH routes."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import base64
+import contextlib
+import hashlib
+import hmac
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shlex
+import sqlite3
+import time
+from urllib.parse import urlsplit
+
+import asyncssh
+from aiohttp import web, WSMsgType
+from cryptography.fernet import Fernet
+from webauthn import (generate_registration_options, verify_registration_response,
+                      generate_authentication_options, verify_authentication_response)
+from webauthn.helpers import options_to_json, bytes_to_base64url, base64url_to_bytes
+from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, ResidentKeyRequirement,
+                                     UserVerificationRequirement, PublicKeyCredentialDescriptor)
+
+from .legacy import Panel, initialize, ROOT
+from .network_assist import (HELPER as NETWORK_HELPER, NetworkStore,
+                             helper_command, parse_probe, probe_command)
+from .auth import hash_password, token_digest, verify_password
+
+
+class State:
+    def __init__(self, data, key_file):
+        self.legacy = Panel(Path(data))
+        self.data = Path(data)
+        self.db = self.data / 'console.sqlite3'
+        self.cipher = Fernet(Path(key_file).read_bytes().strip())
+        self.recent = {}
+        self.challenges = {}
+        self.tickets = {}
+        self.sockets = {}
+        self.failed = {}
+        self.operations = asyncio.Semaphore(8)
+        self.network_changes = asyncio.Lock()
+        self.origin = os.environ.get('PANEL_ORIGIN', '').rstrip('/')
+        self.secure = self.origin.startswith('https://')
+        with self.connect() as db:
+            db.executescript('''
+                CREATE TABLE IF NOT EXISTS hosts (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS vault (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                    kind TEXT NOT NULL, secret BLOB NOT NULL);
+                CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                    public_key TEXT NOT NULL, sign_count INTEGER NOT NULL, created_at INTEGER NOT NULL);
+            ''')
+        self.network = NetworkStore(self)
+
+    @contextlib.contextmanager
+    def connect(self):
+        db = sqlite3.connect(self.db)
+        db.row_factory = sqlite3.Row
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def audit(self, action, target=''):
+        self.legacy.audit(action, target)
+
+    def hosts(self):
+        with self.connect() as db:
+            return [json.loads(r['body']) for r in db.execute('SELECT body FROM hosts')]
+
+    def host(self, id):
+        return next((h for h in self.hosts() if h['id'] == id), None)
+
+    def route(self, id, hosts=None):
+        hosts = {h['id']: h for h in (self.hosts() if hosts is None else hosts)}
+        route = []
+        while id:
+            if any(h['id'] == id for h in route) or len(route) >= 5:
+                raise ValueError('跳板路径存在循环或超过 5 层')
+            h = hosts.get(id)
+            if not h:
+                raise ValueError('主机或跳板不存在')
+            route.append(h)
+            id = h['jump_id']
+        return list(reversed(route))
+
+    def save_host(self, p):
+        h = {k: str(p.get(k, '')).strip() for k in
+             ('id', 'name', 'address', 'username', 'credential_id', 'jump_id', 'host_key', 'group')}
+        h['id'] = h['id'] or secrets.token_hex(8)
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', h['id']):
+            raise ValueError('主机标识无效')
+        if not h['name'] or len(h['name']) > 160 or len(h['group']) > 80:
+            raise ValueError('请填写主机名称（最多 160 字）')
+        address = h['address']
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            if not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?', address):
+                raise ValueError('主机地址无效')
+        if not re.fullmatch(r'[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}', h['username']):
+            raise ValueError('SSH 账号无效')
+        h['port'] = int(p.get('port', 22))
+        if not 1 <= h['port'] <= 65535:
+            raise ValueError('端口必须为 1–65535')
+        h['favorite'] = bool(p.get('favorite'))
+        h['terminal_enabled'] = bool(p.get('terminal_enabled', True))
+        if h['host_key']:
+            h['host_key'] = asyncssh.import_public_key(h['host_key']).export_public_key().decode().strip()
+        if not any(c['id'] == h['credential_id'] for c in self.credentials()):
+            raise ValueError('请选择有效登录凭据')
+        hosts = [v for v in self.hosts() if v['id'] != h['id']] + [h]
+        for v in hosts:
+            self.route(v['id'], hosts)
+        previous = self.host(h['id'])
+        if previous and hasattr(self, 'network'):
+            active = [p for p in self.network.profiles() if p['state'] not in ('disabled', 'error')
+                      and (h['id'] == p['gateway_id'] or h['id'] in p['client_ids'])]
+            changed = any(previous.get(k) != h.get(k) for k in
+                          ('address', 'port', 'username', 'credential_id', 'jump_id', 'host_key'))
+            if active and changed:
+                raise ValueError('该主机正在参与网络借助，请先断开对应方案再修改连接配置')
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO hosts VALUES (?,?)', (h['id'], json.dumps(h)))
+        self.audit('host_saved', h['name'])
+        return h
+
+    def credentials(self):
+        with self.connect() as db:
+            return [dict(r) for r in db.execute('SELECT id,name,kind FROM vault')]
+
+    def secret(self, id):
+        with self.connect() as db:
+            r = db.execute('SELECT * FROM vault WHERE id=?', (id,)).fetchone()
+        if not r:
+            raise ValueError('登录凭据不存在')
+        return r['kind'], json.loads(self.cipher.decrypt(r['secret']))
+
+    def save_credential(self, p):
+        name, kind = str(p.get('name', '')).strip(), p.get('kind')
+        if not name or len(name) > 120 or kind not in ('key', 'password'):
+            raise ValueError('凭据名称或类型无效')
+        secret = str(p.get('secret', ''))
+        phrase = str(p.get('passphrase', ''))
+        if not secret or len(secret) > 24000 or len(phrase) > 1024:
+            raise ValueError('请提供有效的私钥或密码')
+        if kind == 'key':
+            asyncssh.import_private_key(secret, passphrase=phrase or None)
+        id = secrets.token_hex(8)
+        encrypted = self.cipher.encrypt(json.dumps({'value': secret, 'passphrase': phrase}).encode())
+        with self.connect() as db:
+            db.execute('INSERT INTO vault VALUES (?,?,?,?)', (id, name, kind, encrypted))
+        self.audit('credential_added', name)
+        return id
+
+    def check_rate(self, key):
+        now = time.time()
+        self.failed = {k: [t for t in v if now - t < 900] for k, v in self.failed.items() if any(now-t < 900 for t in v)}
+        if len(self.failed.get(key, [])) >= 8:
+            raise web.HTTPTooManyRequests(text='尝试过于频繁，请 15 分钟后重试')
+
+    def fail(self, key):
+        if len(self.failed) < 2048 or key in self.failed:
+            self.failed.setdefault(key, []).append(time.time())
+
+    def passkey_ready(self):
+        return bool(self.origin and (self.secure or urlsplit(self.origin).hostname in ('localhost', '127.0.0.1')))
+
+
+STATE_KEY = web.AppKey("state", State)
+SESSION_KEY = web.RequestKey("session", dict)
+
+
+@contextlib.asynccontextmanager
+async def ssh_route(state, id, stop_before=False):
+    route = state.route(id)
+    connections = []
+    try:
+        for h in (route[:-1] if stop_before else route):
+            if not h['host_key']:
+                raise ValueError(f"{h['name']}：请先核对并保存 SSH 主机指纹")
+            kind, secret = state.secret(h['credential_id'])
+            options = {'client_keys': [], 'agent_path': None, 'config': [],
+                       'known_hosts': ([asyncssh.import_public_key(h['host_key'])], [], []),
+                       'username': h['username'], 'port': h['port'], 'connect_timeout': 12,
+                       'login_timeout': 15, 'keepalive_interval': 20, 'keepalive_count_max': 3}
+            if kind == 'key':
+                options['client_keys'] = [asyncssh.import_private_key(secret['value'], passphrase=secret['passphrase'] or None)]
+            else:
+                options['password'] = secret['value']
+            try:
+                conn = await asyncssh.connect(h['address'], tunnel=connections[-1] if connections else None, **options)
+            except asyncssh.HostKeyNotVerifiable as e:
+                raise ValueError(f"{h['name']}：主机指纹不匹配，连接已停止") from e
+            except asyncssh.PermissionDenied as e:
+                raise ValueError(f"{h['name']}：SSH 认证失败，请检查账号和凭据") from e
+            except (OSError, asyncio.TimeoutError, asyncssh.Error) as e:
+                raise ValueError(f"{h['name']}：连接不可达、超时或 SSH 协议错误（{type(e).__name__}）") from e
+            connections.append(conn)
+        yield connections[-1] if connections else None
+    finally:
+        for conn in reversed(connections):
+            conn.close()
+        for conn in reversed(connections):
+            with contextlib.suppress(Exception):
+                await conn.wait_closed()
+
+
+def _remote_json(result):
+    for line in reversed(result.stdout.splitlines()):
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            if not value.get('ok', False):
+                raise ValueError(value.get('error', '远端网络辅助程序执行失败'))
+            return value
+    detail = (result.stderr or result.stdout or f'exit {result.exit_status}').strip()
+    raise ValueError(('远端网络辅助程序不可用：' + detail)[:2000])
+
+
+async def network_probe_host(state, host_id):
+    host = state.host(host_id)
+    if not host:
+        raise ValueError('主机不存在')
+    try:
+        async with state.operations, ssh_route(state, host_id) as connection:
+            result = await connection.run(probe_command(), timeout=20, check=False)
+        value = parse_probe(result.stdout, result.exit_status)
+        value.update(id=host_id, name=host['name'], address=host['address'], error='')
+        return value
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+        return {'id': host_id, 'name': host['name'], 'address': host['address'],
+                'ssh': False, 'dns': False, 'internet': False, 'helper': False,
+                'hostname': '', 'os': '', 'default_route': '', 'http_code': '000',
+                'assist': [], 'error': message[:1000]}
+
+
+async def network_install_helper(state, host_id):
+    host = state.host(host_id)
+    if not host:
+        raise ValueError('主机不存在')
+    source = ROOT / 'network_assist_helper.py'
+    temporary = f'/tmp/server-network-assist-{secrets.token_hex(8)}'
+    async with state.operations, ssh_route(state, host_id) as connection:
+        try:
+            sftp = await connection.start_sftp_client()
+            await sftp.put(str(source), temporary)
+            install = shlex.join(['sudo', '-n', 'install', '-o', 'root', '-g', 'root',
+                                  '-m', '0755', '--', temporary, NETWORK_HELPER])
+            result = await connection.run(install, timeout=30, check=False)
+            if result.exit_status:
+                detail = (result.stderr or result.stdout).strip()
+                raise ValueError(('安装失败；需要 root 或无密码 sudo 权限。' + (' ' + detail if detail else ''))[:2000])
+            result = await connection.run(helper_command('bootstrap'), timeout=45, check=False)
+            value = _remote_json(result)
+        finally:
+            await connection.run(shlex.join(['rm', '-f', '--', temporary]), timeout=10, check=False)
+    state.audit('network_helper_installed', host['name'])
+    return value
+
+
+async def _network_remote(state, host_id, action, payload=None, *args, timeout=60):
+    async with state.operations, ssh_route(state, host_id) as connection:
+        result = await connection.run(helper_command(action, payload, *args), timeout=timeout, check=False)
+    return _remote_json(result)
+
+
+async def network_enable_profile(state, profile_id):
+    profile = state.network.get(profile_id)
+    if not profile:
+        raise ValueError('借网方案不存在')
+    for other in state.network.profiles():
+        if other['id'] == profile_id or other['state'] in ('disabled', 'error'):
+            continue
+        client_overlap = set(profile['client_ids']) & set(other['client_ids'])
+        role_overlap = profile['gateway_id'] in other['client_ids'] or other['gateway_id'] in profile['client_ids']
+        if client_overlap or role_overlap:
+            raise ValueError('所选主机正在参与另一个活动借网方案，请先断开该方案')
+    state.network.set_state(profile_id, 'enabling')
+    enabled_clients = []
+    gateway_enabled = False
+    try:
+        gateway_probe = await network_probe_host(state, profile['gateway_id'])
+        if not gateway_probe['internet']:
+            raise ValueError('所选出口机当前未通过公网探测，已拒绝切换客户端路由')
+        node_ids = [profile['gateway_id'], *profile['client_ids']]
+        probes = await asyncio.gather(*(network_probe_host(state, value) for value in node_ids))
+        missing = [p['name'] for p in probes if not p['helper']]
+        if missing:
+            raise ValueError('请先安装网络辅助程序：' + '、'.join(missing))
+        prepared = await asyncio.gather(*(_network_remote(state, value, 'prepare', None, profile_id)
+                                         for value in node_ids))
+        public_keys = {node: result['public_key'] for node, result in zip(node_ids, prepared)}
+        gateway_payload, client_payloads = state.network.runtime_payloads(profile, public_keys)
+        await _network_remote(state, profile['gateway_id'], 'configure', gateway_payload)
+        await asyncio.gather(*(_network_remote(state, node, 'configure', client_payloads[node])
+                               for node in profile['client_ids']))
+        await _network_remote(state, profile['gateway_id'], 'enable', None, profile_id, '0')
+        gateway_enabled = True
+        for node in profile['client_ids']:
+            await _network_remote(state, node, 'enable', None, profile_id, '120')
+            enabled_clients.append(node)
+            check = await network_probe_host(state, node)
+            if not check['ssh'] or not check['internet']:
+                raise ValueError(f"{state.host(node)['name']} 切换后未通过 SSH 和公网复检，正在回退")
+            await _network_remote(state, node, 'confirm', None, profile_id)
+        result = state.network.set_state(profile_id, 'enabled')
+        state.audit('network_assist_enabled', profile['name'])
+        return result
+    except Exception as exc:
+        await asyncio.gather(*(_network_remote(state, node, 'disable', None, profile_id)
+                               for node in enabled_clients), return_exceptions=True)
+        if gateway_enabled:
+            await asyncio.gather(_network_remote(state, profile['gateway_id'], 'disable', None, profile_id),
+                                 return_exceptions=True)
+        state.network.set_state(profile_id, 'error', str(exc))
+        raise
+
+
+async def network_disable_profile(state, profile_id):
+    profile = state.network.get(profile_id)
+    if not profile:
+        raise ValueError('借网方案不存在')
+    state.network.set_state(profile_id, 'disabling')
+    results = await asyncio.gather(*(_network_remote(state, node, 'disable', None, profile_id)
+                                     for node in profile['client_ids']), return_exceptions=True)
+    gateway = await asyncio.gather(_network_remote(state, profile['gateway_id'], 'disable', None, profile_id),
+                                   return_exceptions=True)
+    failures = [str(v) for v in [*results, *gateway] if isinstance(v, Exception)]
+    if failures:
+        state.network.set_state(profile_id, 'error', '；'.join(failures))
+        raise ValueError('部分主机未完成回退：' + '；'.join(failures))
+    result = state.network.set_state(profile_id, 'disabled')
+    state.audit('network_assist_disabled', profile['name'])
+    return result
+
+
+def current(state, request):
+    return state.legacy.store.get_session(request.cookies.get('panel_session', ''))
+
+
+def fresh(state, session):
+    if state.recent.get(session['token_hash'], 0) < time.time() - 300:
+        raise web.HTTPForbidden(text='请先在设置中验证管理员密码（验证有效期 5 分钟）')
+
+
+def new_session(state, request, p):
+    days = int(p.get('remember', 0))
+    if days not in (0, 7, 30):
+        raise ValueError('登录时长无效')
+    token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    age = days * 86400 if days else 28800
+    name = str(p.get('device', '')).strip()[:80] or request.headers.get('User-Agent', '浏览器')[:160]
+    state.legacy.store.create_session(token, csrf, 'admin', int(time.time()) + age, request.remote or '', name)
+    state.recent = {k: v for k, v in state.recent.items() if v >= time.time()-300}
+    state.recent[token_digest(token)] = time.time()
+    response = web.json_response({'csrf': csrf})
+    response.set_cookie('panel_session', token, max_age=age, httponly=True, secure=state.secure, samesite='Strict', path='/')
+    state.audit('login', name)
+    return response
+
+
+PUBLIC = {'/api/session', '/api/login', '/api/passkey/options', '/api/passkey/login'}
+
+
+def create_app(data, key_file):
+    state = State(data, key_file)
+
+    @web.middleware
+    async def guard(request, handler):
+        try:
+            if request.method == 'POST' or request.path == '/ws':
+                origin = request.headers.get('Origin')
+                expected = state.origin or f'{request.scheme}://{request.host}'
+                if (origin and origin != expected) or (request.path == '/ws' and not origin):
+                    raise web.HTTPForbidden(text='来源无效')
+            if request.path.startswith('/api/') and request.path not in PUBLIC:
+                session = current(state, request)
+                if not session:
+                    raise web.HTTPUnauthorized(text='请先登录')
+                request[SESSION_KEY] = session
+                if request.method == 'POST' and not hmac.compare_digest(request.headers.get('X-CSRF-Token', ''), session['csrf_token']):
+                    raise web.HTTPForbidden(text='登录验证已更新，请刷新页面')
+            response = await handler(request)
+        except web.HTTPException as e:
+            response = web.json_response({'error': e.text}, status=e.status)
+        except (ValueError, KeyError, TypeError, asyncssh.KeyImportError) as e:
+            response = web.json_response({'error': str(e) or '请求无效'}, status=400)
+        except Exception as e:
+            print('Request failed:', type(e).__name__, flush=True)
+            response = web.json_response({'error': '处理失败，请稍后重试'}, status=500)
+        return response
+
+    app = web.Application(middlewares=[guard], client_max_size=32768)
+    app[STATE_KEY] = state
+
+    async def headers(request, response):
+        response.headers.update({'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
+            'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
+    app.on_response_prepare.append(headers)
+
+    async def get(request):
+        path = request.path
+        session = request.get(SESSION_KEY)
+        if path == '/api/session':
+            s = current(state, request)
+            return web.json_response({'authenticated': bool(s), 'csrf': s['csrf_token'] if s else None,
+                'passkeys': state.passkey_ready(), 'secure': state.secure, 'version': '2.0'})
+        if path == '/api/hosts':
+            return web.json_response({'hosts': state.hosts()})
+        if path == '/api/credentials':
+            return web.json_response({'credentials': state.credentials()})
+        if path == '/api/network':
+            return web.json_response({'profiles': state.network.profiles()})
+        if path == '/api/security':
+            with state.legacy.store._connect() as db:
+                rows = db.execute('SELECT token_hash,user_agent,remote_ip,created_at,expires_at FROM sessions WHERE expires_at>=? ORDER BY created_at DESC', (int(time.time()),)).fetchall()
+            with state.connect() as db:
+                keys = [dict(r) for r in db.execute('SELECT id,name,created_at FROM passkeys')]
+            return web.json_response({'devices': [{**dict(r), 'current': r['token_hash'] == session['token_hash']} for r in rows],
+                'passkeys': keys, 'key_enabled': bool(state.legacy.credentials.get('key_hash')),
+                'verified': state.recent.get(session['token_hash'], 0) >= time.time()-300})
+        if path == '/api/audit':
+            return web.json_response({'events': state.legacy.store.list_audit(100)})
+        if path == '/api/servers':
+            return web.json_response({'servers': [{k: s[k] for k in ('id', 'name', 'address', 'route')} for s in state.legacy.servers]})
+        raise web.HTTPNotFound(text='不存在')
+
+    async def post(request):
+        p = await request.json()
+        if not isinstance(p, dict):
+            raise ValueError('请求必须为对象')
+        path, session = request.path, request.get(SESSION_KEY)
+        ip = request.remote or ''
+        if path == '/api/login':
+            state.check_rate(ip)
+            # Existing password/key hashes remain valid during migration.
+            c = state.legacy.credentials
+            password_ok = await asyncio.to_thread(verify_password, str(p.get('password', '')), c['password_hash'])
+            key_ok = bool(c.get('key_hash')) and hmac.compare_digest(hashlib.sha256(str(p.get('key', '')).encode()).hexdigest(), c['key_hash'])
+            if p.get('username') != 'admin' or not (password_ok or key_ok):
+                state.fail(ip)
+                state.audit('login_failed')
+                raise web.HTTPUnauthorized(text='账号或凭据不正确')
+            response = new_session(state, request, p)
+            state.failed.pop(ip, None)
+            return response
+        if path.startswith('/api/passkey/'):
+            return await passkey(request, p)
+        if path == '/api/logout':
+            state.legacy.store.delete_session(request.cookies['panel_session'])
+            state.recent.pop(session['token_hash'], None)
+            response = web.json_response({'ok': True})
+            response.del_cookie('panel_session', path='/')
+            return response
+        if path == '/api/reauth':
+            state.check_rate(ip)
+            if not await asyncio.to_thread(verify_password, str(p.get('password', '')), state.legacy.credentials['password_hash']):
+                state.fail(ip)
+                raise web.HTTPForbidden(text='管理员密码不正确')
+            state.recent[session['token_hash']] = time.time()
+            return web.json_response({'ok': True})
+        if path == '/api/run':
+            result = await asyncio.to_thread(state.legacy.run, p.get('server'), p.get('action'))
+            state.audit(p.get('action'), p.get('server'))
+            return web.json_response(result)
+        if path == '/api/host/test':
+            id = str(p.get('id', ''))
+            async with state.operations, ssh_route(state, id) as conn:
+                result = await conn.run('hostname; whoami', timeout=10, check=False)
+            state.audit('host_test', id)
+            return web.json_response({'ok': result.exit_status == 0, 'output': (result.stdout+result.stderr)[:16384],
+                'route': [h['name'] for h in state.route(id)]})
+        if path == '/api/terminal/ticket':
+            h = state.host(p.get('id'))
+            if not h or not h['terminal_enabled']:
+                raise ValueError('该主机未启用终端')
+            if len(state.sockets) >= 12:
+                raise ValueError('终端数量已达上限，请先断开不用的终端')
+            ticket = secrets.token_urlsafe(32)
+            now = time.time()
+            state.tickets = {k: v for k,v in state.tickets.items() if v['expires'] > now}
+            if len(state.tickets) >= 100:
+                raise web.HTTPTooManyRequests(text='连接请求过多')
+            state.tickets[ticket] = {'session': session['token_hash'], 'id': h['id'], 'expires': now+30,
+                                     'persistent': bool(p.get('persistent')), 'route': state.route(h['id'])}
+            return web.json_response({'ticket': ticket})
+        if path == '/api/network/probe':
+            ids = p.get('ids') or [h['id'] for h in state.hosts()]
+            if not isinstance(ids, list) or len(ids) > 64:
+                raise ValueError('探测主机列表无效')
+            results = await asyncio.gather(*(network_probe_host(state, str(value)) for value in ids))
+            state.audit('network_probe', f'{len(results)} hosts')
+            return web.json_response({'results': results, 'checked_at': int(time.time())})
+        fresh(state, session)
+        if path == '/api/network/helper/install':
+            ids = p.get('ids', [])
+            if not isinstance(ids, list) or not ids or len(ids) > 32:
+                raise ValueError('请选择要安装辅助程序的主机')
+            results = []
+            for value in dict.fromkeys(str(v) for v in ids):
+                results.append({'id': value, **await network_install_helper(state, value)})
+            return web.json_response({'results': results})
+        if path == '/api/network/profile/save':
+            profile = state.network.save(p)
+            state.audit('network_profile_saved', profile['name'])
+            return web.json_response({'profile': profile})
+        if path == '/api/network/profile/enable':
+            async with state.network_changes:
+                profile = await network_enable_profile(state, str(p.get('id', '')))
+            return web.json_response({'profile': profile})
+        if path == '/api/network/profile/disable':
+            async with state.network_changes:
+                profile = await network_disable_profile(state, str(p.get('id', '')))
+            return web.json_response({'profile': profile})
+        if path == '/api/network/profile/delete':
+            profile = state.network.get(str(p.get('id', '')))
+            state.network.delete(str(p.get('id', '')))
+            state.audit('network_profile_deleted', profile['name'] if profile else str(p.get('id', '')))
+            return web.json_response({'ok': True})
+        if path == '/api/host/save':
+            return web.json_response({'host': state.save_host(p)})
+        if path == '/api/host/delete':
+            if any(h['jump_id'] == p.get('id') for h in state.hosts()):
+                raise ValueError('该主机仍被用作跳板，请先修改关联路径')
+            target_id = p.get('id')
+            if any(profile.get('gateway_id') == target_id or target_id in profile.get('client_ids', [])
+                   for profile in state.network.profiles()):
+                raise ValueError('该主机仍被网络借助方案使用，请先删除对应方案')
+            with state.connect() as db:
+                db.execute('DELETE FROM hosts WHERE id=?', (p.get('id'),))
+            state.audit('host_deleted', str(p.get('id')))
+        elif path == '/api/host/inspect':
+            h = state.host(p.get('id'))
+            if not h:
+                raise ValueError('请先保存主机再读取指纹')
+            async with state.operations, ssh_route(state, h['id'], stop_before=True) as tunnel:
+                key = await asyncio.wait_for(asyncssh.get_server_host_key(h['address'], port=h['port'], tunnel=tunnel, config=[]), 15)
+            if not key:
+                raise ValueError('未读取到主机公钥')
+            return web.json_response({'host_key': key.export_public_key().decode().strip(), 'fingerprint': key.get_fingerprint('sha256')})
+        elif path == '/api/credential/save':
+            return web.json_response({'id': state.save_credential(p)})
+        elif path == '/api/credential/delete':
+            if any(h['credential_id'] == p.get('id') for h in state.hosts()):
+                raise ValueError('凭据仍被主机使用')
+            with state.connect() as db:
+                db.execute('DELETE FROM vault WHERE id=?', (p.get('id'),))
+            state.audit('credential_deleted', str(p.get('id')))
+        elif path == '/api/device/revoke':
+            with state.legacy.store._connect() as db:
+                db.execute('DELETE FROM sessions WHERE token_hash=?', (p.get('id'),))
+            state.recent.pop(p.get('id'), None)
+            state.audit('device_revoked')
+        elif path == '/api/password':
+            password = str(p.get('new_password', ''))
+            if not 12 <= len(password) <= 256:
+                raise ValueError('新密码需为 12–256 个字符')
+            updated = {**state.legacy.credentials, 'password_hash': await asyncio.to_thread(hash_password, password)}
+            temporary = state.data / 'credentials.tmp'
+            temporary.write_text(json.dumps(updated), encoding='utf8')
+            temporary.chmod(0o600)
+            temporary.replace(state.data / 'credentials.json')
+            state.legacy.credentials = updated
+            with state.legacy.store._connect() as db:
+                db.execute('DELETE FROM sessions')
+            state.recent.clear()
+            state.audit('password_changed')
+        elif path == '/api/key':
+            key = state.legacy.rotate_key(bool(p.get('revoke')))
+            state.recent.clear()
+            state.audit('key_revoked' if not key else 'key_rotated')
+            return web.json_response({'key': key})
+        elif path == '/api/passkey-delete':
+            with state.connect() as db:
+                db.execute('DELETE FROM passkeys WHERE id=?', (p.get('id'),))
+            # Revoke existing sessions as their original authenticator is not stored.
+            with state.legacy.store._connect() as db:
+                db.execute('DELETE FROM sessions')
+            state.audit('passkey_deleted')
+        else:
+            raise web.HTTPNotFound(text='不存在')
+        return web.json_response({'ok': True})
+
+    async def passkey(request, p):
+        if not state.passkey_ready():
+            raise ValueError('通行密钥需要配置固定 HTTPS 入口')
+        register = request.path in ('/api/passkey/register-options', '/api/passkey/register')
+        session = request.get(SESSION_KEY)
+        if register:
+            fresh(state, session)
+        else:
+            state.check_rate(request.remote or '')
+        rp = urlsplit(state.origin).hostname
+        if request.path.endswith('options'):
+            with state.connect() as db:
+                keys = [PublicKeyCredentialDescriptor(id=base64url_to_bytes(r['id'])) for r in db.execute('SELECT id FROM passkeys')]
+            if register:
+                opts = generate_registration_options(rp_id=rp, rp_name='Server Network Assist', user_name='admin', user_id=b'server-network-assist-admin',
+                    exclude_credentials=keys, authenticator_selection=AuthenticatorSelectionCriteria(
+                        resident_key=ResidentKeyRequirement.PREFERRED, user_verification=UserVerificationRequirement.REQUIRED))
+            else:
+                if not keys:
+                    raise ValueError('尚未添加通行密钥，请先使用密码登录')
+                opts = generate_authentication_options(rp_id=rp, allow_credentials=keys, user_verification=UserVerificationRequirement.REQUIRED)
+            state.challenges = {k:v for k,v in state.challenges.items() if v['expires'] > time.time()}
+            if len(state.challenges) >= 100:
+                raise web.HTTPTooManyRequests(text='验证请求过多')
+            id = secrets.token_urlsafe(32)
+            state.challenges[id] = {'challenge': opts.challenge, 'register': register, 'expires': time.time()+120,
+                'session': session['token_hash'] if register else None}
+            response = web.json_response(json.loads(options_to_json(opts)))
+            response.set_cookie('pk_challenge', id, httponly=True, secure=state.secure, samesite='Strict', max_age=120, path='/')
+            return response
+        challenge = state.challenges.pop(request.cookies.get('pk_challenge', ''), None)
+        if not challenge or challenge['expires'] < time.time() or challenge['register'] != register:
+            raise ValueError('验证已过期，请重新操作')
+        if register and challenge['session'] != session['token_hash']:
+            raise web.HTTPForbidden(text='验证会话不匹配')
+        try:
+            if register:
+                result = verify_registration_response(credential=p['credential'], expected_challenge=challenge['challenge'],
+                    expected_rp_id=rp, expected_origin=state.origin, require_user_verification=True)
+                with state.connect() as db:
+                    db.execute('INSERT INTO passkeys VALUES (?,?,?,?,?)', (bytes_to_base64url(result.credential_id),
+                        str(p.get('name','通行密钥'))[:80], bytes_to_base64url(result.credential_public_key), result.sign_count, int(time.time())))
+                state.audit('passkey_added')
+                response = web.json_response({'ok': True})
+            else:
+                with state.connect() as db:
+                    row = db.execute('SELECT * FROM passkeys WHERE id=?', (p['credential']['id'],)).fetchone()
+                    if not row:
+                        raise ValueError('通行密钥不存在')
+                    result = verify_authentication_response(credential=p['credential'], expected_challenge=challenge['challenge'],
+                        expected_rp_id=rp, expected_origin=state.origin, credential_public_key=base64url_to_bytes(row['public_key']),
+                        credential_current_sign_count=row['sign_count'], require_user_verification=True)
+                    db.execute('UPDATE passkeys SET sign_count=? WHERE id=?', (result.new_sign_count, row['id']))
+                response = new_session(state, request, p)
+        except Exception as e:
+            state.fail(request.remote or '')
+            raise ValueError('通行密钥验证失败，请重试或使用密码') from e
+        response.del_cookie('pk_challenge', path='/')
+        return response
+
+    async def websocket(request):
+        session = current(state, request)
+        if not session:
+            raise web.HTTPUnauthorized(text='请先登录')
+        if len(state.sockets) >= 12:
+            raise web.HTTPTooManyRequests(text='终端数量已达上限')
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=32768, compress=False)
+        await ws.prepare(request)
+        state.sockets[id(ws)] = ws
+        jobs = []
+        try:
+            message = await ws.receive_json(timeout=10)
+            ticket = state.tickets.pop(message.get('ticket', ''), None)
+            if not ticket or ticket['expires'] < time.time() or ticket['session'] != session['token_hash']:
+                await ws.close(code=1008, message=b'Invalid ticket')
+                return ws
+            h = state.host(ticket['id'])
+            if not h or not h['terminal_enabled']:
+                raise ValueError('主机已移除或终端已禁用')
+            if state.route(h['id']) != ticket['route']:
+                raise ValueError('主机配置已改变，请重新连接')
+            async def watch_session():
+                while not ws.closed:
+                    await asyncio.sleep(1)
+                    try:
+                        unchanged = state.route(h['id']) == ticket['route']
+                    except ValueError:
+                        unchanged = False
+                    if not current(state, request) or not unchanged:
+                        await ws.close(code=1008, message=b'Session revoked or expired')
+                        return
+            jobs.append(asyncio.create_task(watch_session()))
+            async with ssh_route(state, h['id']) as conn:
+                if ws.closed or not current(state, request):
+                    return ws
+                command = 'tmux new-session -A -s network-assist-admin' if ticket['persistent'] else None
+                async with conn.create_process(command, term_type='xterm-256color', term_size=(100,30), encoding=None) as process:
+                    state.audit('terminal_open', h['name'])
+                    await ws.send_json({'type':'ready', 'route': [r['name'] for r in state.route(h['id'])]})
+                    async def stream(reader):
+                        while not ws.closed:
+                            chunk = await reader.read(16384)
+                            if not chunk:
+                                break
+                            await ws.send_bytes(chunk)
+                    jobs.extend([asyncio.create_task(stream(process.stdout)), asyncio.create_task(stream(process.stderr))])
+                    async def wait_exit():
+                        await process.wait_closed()
+                        await asyncio.gather(*jobs[1:3], return_exceptions=True)
+                        await ws.close()
+                    jobs.append(asyncio.create_task(wait_exit()))
+                    async for msg in ws:
+                        try:
+                            unchanged = state.route(h['id']) == ticket['route']
+                        except ValueError:
+                            unchanged = False
+                        if not current(state, request) or not unchanged:
+                            await ws.close(code=1008)
+                            break
+                        if msg.type == WSMsgType.BINARY:
+                            process.stdin.write(msg.data)
+                            await process.stdin.drain()
+                        elif msg.type == WSMsgType.TEXT:
+                            event = json.loads(msg.data)
+                            if event.get('type') == 'input':
+                                process.stdin.write(str(event.get('data','')).encode())
+                                await process.stdin.drain()
+                            elif event.get('type') == 'resize':
+                                process.change_terminal_size(max(20,min(400,int(event['cols']))), max(5,min(150,int(event['rows']))))
+                    process.close()
+            state.audit('terminal_closed', h['name'])
+        except Exception as e:
+            if not ws.closed:
+                with contextlib.suppress(Exception):
+                    await ws.send_json({'type':'error','message': str(e) if isinstance(e, ValueError) else f'终端连接结束（{type(e).__name__}）'})
+                await ws.close()
+        finally:
+            for task in jobs:
+                task.cancel()
+            await asyncio.gather(*jobs, return_exceptions=True)
+            state.sockets.pop(id(ws), None)
+        return ws
+
+    async def static(request):
+        name = request.match_info.get('name', '') or 'index.html'
+        root = (ROOT / 'ui').resolve()
+        target = (root / name).resolve()
+        if root not in target.parents or not target.is_file():
+            target = root / 'index.html'
+        if not target.is_file():
+            raise web.HTTPServiceUnavailable(text='前端尚未构建，请先执行 npm run build')
+        return web.FileResponse(target)
+
+    async def shutdown(app):
+        await asyncio.gather(*(ws.close(code=1001) for ws in list(state.sockets.values())), return_exceptions=True)
+    app.on_shutdown.append(shutdown)
+    app.router.add_get('/ws', websocket)
+    app.router.add_get('/api/{tail:.*}', get)
+    app.router.add_post('/api/{tail:.*}', post)
+    app.router.add_get('/', static)
+    app.router.add_get('/{name:.*}', static)
+    return app
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data', type=Path, required=True)
+    parser.add_argument('--master-key', type=Path, required=True)
+    parser.add_argument('--bind', default='127.0.0.1')
+    parser.add_argument('--port', type=int, default=9180)
+    args = parser.parse_args()
+    web.run_app(create_app(args.data, args.master_key), host=args.bind, port=args.port, access_log=None)
