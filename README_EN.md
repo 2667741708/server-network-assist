@@ -1,6 +1,8 @@
 # Server Network Assist
 
-Server Network Assist is a self-hosted console for SSH inventory, layered reachability checks, browser terminals, and reversible WireGuard-based Internet sharing for Windows and Ubuntu/Linux clients with a Linux gateway.
+Server Network Assist is a self-hosted console for SSH inventory, layered reachability checks, browser terminals, and reversible WireGuard-based Internet sharing between Windows and Ubuntu/Linux machines. Either system can be a gateway or client, subject to the prerequisites below.
+
+Windows gateways use native WireGuard and WinNAT; existing NATs are preserved and cause a conflict refusal. Profiles can optionally share an upstream HTTP/HTTPS proxy through a tunnel-only relay. Direct mode preserves the client's existing proxy settings. Proxy sharing does not copy subscriptions, PAC or credentials, and disabling it does not bypass gateway VPN/TUN routing. See [sharing scope and validation limits](docs/SHARING.md) and the [standalone illustrated blog](docs/blog/README.md). Reinstall current helpers on all participating hosts when upgrading.
 
 Version 0.2.0 adds a local desktop panel. Run `server-network-assist-desktop` to open a standalone browser app window with local tunnel controls, traffic, handshake and system-proxy diagnostics. The Windows installer creates a desktop shortcut and a protected offline runtime; no WSL is required. See the [desktop guide](docs/DESKTOP.md).
 
@@ -18,7 +20,7 @@ Open the desktop panel and compare direct Internet access with access using the 
 
 ### 2. Share an Ubuntu gateway with Windows and Ubuntu clients
 
-Add the hosts, verify SSH fingerprints, probe connectivity, and install the helpers. Under **网络借助**, select the Internet-connected Linux gateway and both clients, then configure a reachable endpoint, UDP port, unused tunnel subnet, and management routes to preserve. Enable and wait for SSH/Internet verification; failures trigger rollback. Windows uses native WireGuard and does not require WSL. Windows gateways are not supported.
+Add the hosts, verify SSH fingerprints, probe connectivity, and install the helpers. Under **网络借助**, select the Internet-connected gateway and both clients, then configure a reachable endpoint, UDP port, unused tunnel subnet, and management routes to preserve. Enable and wait for SSH and selected-path verification; failures trigger rollback. Windows uses native WireGuard and does not require WSL; Windows gateways additionally require WinNAT and no conflicting existing NAT.
 
 The screenshot shows an example profile **before activation**. To finish a managed session and clean up its temporary routes, use **断开并恢复原网络** in the management console. See the [network guide](docs/NETWORK_ASSIST.md).
 

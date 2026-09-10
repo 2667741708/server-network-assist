@@ -2,13 +2,15 @@
 
 ## 数据路径
 
-客户端建立 WireGuard 隧道到出口机。客户端公网路由使用两个 `/1` 前缀覆盖默认路由，避免直接删除原默认路由；出口机开启 IPv4 转发，并使用带唯一注释的 iptables 规则做 MASQUERADE。
+客户端建立 WireGuard 隧道到出口机。客户端公网路由使用两个 `/1` 前缀覆盖默认路由，避免直接删除原默认路由；Linux 出口使用带唯一注释的 iptables 规则做 MASQUERADE，Windows 出口使用原生 WinNAT 和可恢复的接口转发设置。两种系统均可作为出口或客户端，前提见 [跨平台共享与代理选择](SHARING.md)。
+
+可选代理模式在隧道地址提供 TCP 中继，将 HTTP/HTTPS 代理请求送到源机器的指定代理端口，并记录客户端代理修改以便断开恢复。它不改变源代理软件的订阅、规则或 TUN。
 
 管理台不会接收 WireGuard 私钥。每台主机上的 root helper 本地生成私钥，只把公钥返回给管理台。
 
 ## 启用事务
 
-1. 确认出口机当前通过公网探测。
+1. 确认出口机 SSH 与转发能力；普通模式检查直连公网，共享代理模式额外验证指定源代理。
 2. 确认全部节点已安装 helper。
 3. 每台主机本地生成密钥并返回公钥。
 4. 下发受校验的 WireGuard 配置。
@@ -42,7 +44,7 @@ sudo /usr/local/sbin/server-network-assist-helper bootstrap
 
 `bootstrap` 检查 `wg`、`wg-quick`、`ip`、`iptables` 和 `systemctl`，安装维护 unit，并为当前 `SUDO_USER` 写入只允许调用该 helper 的 sudoers 条目。请检查 `/etc/sudoers.d/server-network-assist-*` 是否只对应专用运维账号。
 
-面板里的“安装辅助程序”仅适用于已经允许该 SSH 账号执行非交互 `sudo install` 的环境；更严格的环境应采用上述手工安装。
+Linux 节点的“安装辅助程序”需要该 SSH 账号可执行非交互 `sudo install`；更严格的环境应采用上述手工安装。Windows 原生安装见 [WINDOWS.md](WINDOWS.md)。
 
 ## 紧急回退
 

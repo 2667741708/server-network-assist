@@ -71,7 +71,11 @@ const server = http.createServer((request,response)=>{
     await page.locator('.profile-item').filter({hasText:profile.name}).click();
     await page.getByRole('heading',{name:'方案设置',exact:true}).waitFor();
     await page.screenshot({path:path.join(output,'mixed-network-profile.png'),fullPage:true});
+    await page.getByRole('combobox',{name:'是否共享源机器的代理',exact:true}).click();
+    await page.getByRole('option',{name:'共享网络，同时共享 HTTP/HTTPS 代理',exact:true}).click();
+    await page.getByRole('textbox',{name:'源机器上的 HTTP 代理 IPv4',exact:true}).waitFor();
+    await page.screenshot({path:path.join(output,'proxy-sharing.png'),fullPage:true});
     if (errors.length) throw new Error(errors.join('\n'));
-    console.log('Captured four documentation screenshots from shipped UI with synthetic data. No server commands executed.');
+    console.log('Captured five documentation screenshots from shipped UI with synthetic data. No server commands executed.');
   } finally {if(browser) await browser.close(); await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

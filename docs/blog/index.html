@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="从 Windows 与 WSL 联网差异出发，记录 Server Network Assist 的跨平台网络共享、代理选择、桌面面板与可回退设计。"
+    />
+    <title>让 Windows 与 Ubuntu，共用一条网络 · 网络手记</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="blog.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#article">跳到正文</a>
+    <div id="progress" aria-hidden="true"></div>
+    <header class="masthead">
+      <a class="brand" href="./index.html"
+        ><span class="brand-icon" aria-hidden="true">↗</span> 网络手记
+        <span class="brand-en">NETWORK NOTES</span></a
+      >
+      <nav aria-label="站点导航">
+        <a href="#guide">使用教程</a
+        ><a href="https://github.com/2667741708/server-network-assist"
+          >GitHub ↗</a
+        ><button id="theme" type="button" aria-label="切换深浅主题">
+          ◐ <span>深浅主题</span>
+        </button>
+      </nav>
+    </header>
+    <div class="page">
+      <aside class="rail">
+        <p class="eyebrow">IN THIS NOTE</p>
+        <nav aria-label="文章目录">
+          <a href="#origin"><span>01</span> 一次联网故障</a
+          ><a href="#paths"><span>02</span> 网络与代理</a
+          ><a href="#guide"><span>03</span> 开始共享</a
+          ><a href="#desktop"><span>04</span> 桌面上的日常</a
+          ><a href="#recovery"><span>05</span> 为断开做好准备</a
+          ><a href="#further"><span>06</span> 延伸阅读</a>
+        </nav>
+        <div class="rail-note">
+          一个小型实验室的<br />跨平台网络实践。<br /><a
+            href="https://github.com/2667741708/server-network-assist/blob/main/README.md"
+            >查看项目文档 ↗</a
+          >
+        </div>
+      </aside>
+      <main id="article">
+        <header class="article-header">
+          <p class="eyebrow">
+            <span class="dot"></span> ENGINEERING JOURNAL
+            <span class="issue">/ 001</span>
+          </p>
+          <h1>让 Windows 与 Ubuntu，<br /><em>共用一条网络。</em></h1>
+          <p class="dek">
+            从“WSL 能上网，Windows
+            却不行”开始，做一个看得清状态、选得清路径、也能恢复原网络的小工具。
+          </p>
+          <div class="byline">
+            <span class="avatar">N</span><span>网络手记 · 项目实践</span
+            ><span class="date">2026 年 9 月 10 日</span
+            ><span>约 8 分钟阅读</span>
+          </div>
+        </header>
+        <figure class="hero-figure">
+          <div class="mini-label">
+            THE IDEA <span>不同的系统，相同的连接方式</span>
+          </div>
+          <div class="hero-network">
+            <div class="client-stack">
+              <div>
+                <span class="os-symbol">⊞</span><strong>Windows</strong
+                ><small>原生客户端</small>
+              </div>
+              <div>
+                <span class="os-symbol">◉</span><strong>Ubuntu</strong
+                ><small>原生客户端</small>
+              </div>
+            </div>
+            <div class="wire">
+              <span>WireGuard</span><i></i><span>加密隧道</span>
+            </div>
+            <div class="gateway-node">
+              <span class="node-mark">↗</span><strong>你的出口机</strong
+              ><small>Windows / Ubuntu</small>
+            </div>
+            <div class="wire final-wire">
+              <span>可选代理</span><i></i><span>按需共享</span>
+            </div>
+            <div class="internet-node">
+              <span>◎</span><strong>Internet</strong>
+            </div>
+          </div>
+          <figcaption>
+            架构示意。实际能力取决于出口机的转发组件、路由和代理服务。
+          </figcaption>
+        </figure>
+        <div class="lead-note">
+          <span>写在前面</span>
+          <p>
+            网络通了，只是开始。更重要的是知道流量从哪里出去，哪些应用用了代理，以及退出共享后能否回到原来的网络。
+          </p>
+        </div>
+        <section id="origin">
+          <p class="section-number">01 / THE PROBLEM</p>
+          <h2>同一台机器，为什么有两种联网结果？</h2>
+          <p>
+            这次项目里的故障很具体：服务器的 WSL 可以访问网络，但 Windows
+            应用仍然失败。顺着路由检查下去，问题落在了 Windows
+            用户的手动代理——它还指向一个不能正常提供服务的本地端口。
+          </p>
+          <p>
+            这件事让我们把“联网”拆成两个问题：<strong
+              >网络本身能否到达公网？应用最终选择的路径是否可用？</strong
+            >
+            前者成功，不代表后者也成功。一个仍然开启的代理、一段 PAC
+            配置，或者应用自己的设置，都可能改变结果。
+          </p>
+          <figure>
+            <a href="../images/windows-proxy-diagnosis.png" class="zoom"
+              ><img
+                src="../images/windows-proxy-diagnosis.png"
+                alt="桌面面板提示系统代理可能异常，直连公网可用而系统应用联网不可用"
+                loading="lazy"
+                width="1280"
+                height="1000"
+            /></a>
+            <figcaption>
+              <b>图 1.</b>
+              先比较两项探测，再检查代理。本文界面截图使用演示数据，地址、流量和延迟不是生产测量值。点击图片查看原图。
+            </figcaption>
+          </figure>
+          <p>
+            桌面面板的“关闭手动代理”会先备份当前用户配置，再关闭开关。它不会删除代理软件的配置。只有确定不再需要该代理时才使用它；如果直连也失败，就需要继续检查
+            DNS、隧道和出口。
+          </p>
+        </section>
+        <section id="paths">
+          <p class="section-number">02 / THE MENTAL MODEL</p>
+          <h2>共享网络，也可以选择共享代理。</h2>
+          <p>
+            一台能够联网的机器可以成为出口。其他机器通过 WireGuard 把 IPv4
+            流量送给它，再由出口转发到外网。Ubuntu 使用 Linux 转发和
+            NAT；Windows 使用原生 WireGuard 与 WinNAT，不要求安装 WSL。
+          </p>
+          <p>
+            应用代理是另一层。源机器上即便开着 Clash
+            一类软件，客户端也不能直接使用自己的
+            <code>127.0.0.1:7897</code>
+            来访问它——每台机器的回环地址都只代表自己。因此，共享代理需要一个通过隧道可达的入口。
+          </p>
+          <div class="explorer">
+            <div class="explorer-title">
+              <span class="eyebrow">TRY THE ROUTE</span
+              ><span>交互示意 · 不修改真实网络</span>
+            </div>
+            <div class="choices">
+              <label
+                >出口系统<select id="gateway-os" aria-label="出口系统">
+                  <option>Windows</option>
+                  <option>Ubuntu</option>
+                </select></label
+              ><label
+                >客户端系统<select id="client-os" aria-label="客户端系统">
+                  <option>Ubuntu</option>
+                  <option>Windows</option>
+                </select></label
+              >
+            </div>
+            <label class="proxy-toggle"
+              ><input id="share-proxy" type="checkbox" /><span
+                >同时共享源机器的 HTTP/HTTPS 代理</span
+              ></label
+            >
+            <div class="route-preview" aria-live="polite">
+              <span id="route-client">Ubuntu 客户端</span
+              ><span aria-hidden="true">→</span><span>WireGuard</span
+              ><span aria-hidden="true">→</span
+              ><span id="route-gateway">Windows 出口</span
+              ><span aria-hidden="true">→</span
+              ><span id="route-exit">公网</span>
+            </div>
+            <p id="route-note">
+              仅共享网络：客户端原有代理设置保留，源机器的应用代理不会自动复制。
+            </p>
+          </div>
+          <div class="compare">
+            <div>
+              <span class="mode-number">A</span>
+              <h3>仅共享网络</h3>
+              <p>
+                使用出口的网络转发，不传递源应用代理。客户端已有代理保持原样，故障代理需要单独排查。
+              </p>
+            </div>
+            <div>
+              <span class="mode-number">B</span>
+              <h3>同时共享代理</h3>
+              <p>
+                填写源机器的
+                HTTP/混合代理端口。隧道内的转发入口连接到它，客户端使用该入口，断开时恢复设置。
+              </p>
+            </div>
+          </div>
+          <aside class="callout">
+            <strong>一个开关的边界</strong>
+            <p>
+              这里共享的是 HTTP 代理（含 HTTPS
+              CONNECT），不是复制订阅、规则、PAC 或账号密码。VPN/TUN
+              已经改变了源机器的系统路由；“不共享代理”不会绕过该路由，也不会关闭源机器的代理软件。
+            </p>
+          </aside>
+        </section>
+        <section id="guide">
+          <p class="section-number">03 / THE WALKTHROUGH</p>
+          <h2>从三台机器，开始一次共享。</h2>
+          <p>
+            我们的示例有一台出口机、一台 Windows 工作站和一台 Ubuntu
+            计算节点。先确认它们能通过 SSH 管理，再选择出口。不要把文档里的
+            <code>192.0.2.x</code> 示例地址直接用于部署。
+          </p>
+          <div class="step">
+            <span>1</span>
+            <div>
+              <h3>安装并打开管理台</h3>
+              <p>
+                使用当前源码。下面是 Windows PowerShell 命令；Ubuntu 用
+                <code>python3 -m venv .venv</code> 创建环境，再按 README
+                激活并安装。
+              </p>
+            </div>
+          </div>
+          <div class="codebox">
+            <div>
+              <span>Windows · PowerShell</span
+              ><button class="copy" type="button">复制命令</button>
+            </div>
+            <pre><code>git clone https://github.com/2667741708/server-network-assist.git
+cd server-network-assist
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\server-network-assist.exe init --data ./data
+.\.venv\Scripts\server-network-assist.exe serve --data ./data --bind 127.0.0.1 --port 9180</code></pre>
+            <p class="copy-status" aria-live="polite"></p>
+          </div>
+          <p>
+            浏览器访问 <code>http://127.0.0.1:9180</code>。首次账号保存在本机的
+            <code>data/initial-login.json</code>，按 README
+            完成登录与恢复密钥保管。<a
+              href="https://github.com/2667741708/server-network-assist#快速开始"
+              >完整安装步骤 ↗</a
+            >
+          </p>
+          <div class="step">
+            <span>2</span>
+            <div>
+              <h3>添加主机，核对身份</h3>
+              <p>
+                添加 SSH
+                凭据和主机，通过可信渠道核对主机指纹。进入“网络借助”，探测全部主机，再为节点安装当前版本辅助程序。Windows
+                要有管理员 SSH 账号和原生 WireGuard；作为出口时还需要 WinNAT。
+              </p>
+            </div>
+          </div>
+          <div class="step">
+            <span>3</span>
+            <div>
+              <h3>选择出口、客户端和代理方式</h3>
+              <p>
+                填写可达的出口地址、UDP 端口和无冲突的隧道网段。把
+                SSH、校园网认证或其他管理网络加入保留路由。选择“同时共享代理”时，填写<strong>源机器上的</strong>代理地址与端口，例如
+                <code>127.0.0.1:7897</code>。
+              </p>
+            </div>
+          </div>
+          <figure>
+            <a href="../images/proxy-sharing.png" class="zoom"
+              ><img
+                src="../images/proxy-sharing.png"
+                alt="管理台的混合系统借网方案设置，包含出口机、客户端、保留路由和共享代理选择"
+                loading="lazy"
+            /></a>
+            <figcaption>
+              <b>图 2.</b> 待启用的示例方案。Windows 和 Ubuntu
+              都可被选作出口或客户端；具体前提见兼容性说明。
+            </figcaption>
+          </figure>
+          <div class="step">
+            <span>4</span>
+            <div>
+              <h3>启用，然后验证真正要用的应用</h3>
+              <p>
+                程序先配置出口，再切换客户端，随后验证 SSH
+                和所选网络路径。共享代理时额外验证隧道里的代理入口。最后在浏览器、终端或下载工具中重试目标服务，不能只看隧道图标。
+              </p>
+            </div>
+          </div>
+          <div
+            class="table-scroll"
+            tabindex="0"
+            aria-label="系统代理生效范围，可横向滚动"
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>客户端</th>
+                  <th>共享代理的生效范围</th>
+                  <th>使用时注意</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Windows</td>
+                  <td>SSH 账号的 Windows 用户系统代理</td>
+                  <td>
+                    桌面需使用同一账号；独立设置代理的应用、WinHTTP
+                    服务不自动继承。
+                  </td>
+                </tr>
+                <tr>
+                  <td>Ubuntu</td>
+                  <td>新登录 shell、APT、SSH 用户已登录的 GNOME 会话</td>
+                  <td>
+                    已有 shell 需重新登录；非 GNOME 桌面及独立服务需单独配置。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small">
+            源代理需支持无认证 HTTP/CONNECT；仅 SOCKS、PAC
+            或认证代理需要另行适配。源服务关闭或代理路径失败时，共享不会自动切成直连来隐藏问题。
+          </p>
+        </section>
+        <section id="desktop">
+          <p class="section-number">04 / EVERYDAY USE</p>
+          <h2>复杂的配置，留给第一次。</h2>
+          <p>
+            日常更常见的操作是查看状态。安装桌面面板后，在 Windows
+            双击“服务器网络助手”，就能看到直连、系统应用联网、最近握手和隧道流量。Ubuntu
+            也可以运行
+            <code>server-network-assist-desktop</code>，网络控制需要相应权限。
+          </p>
+          <figure>
+            <a href="../images/desktop-overview.png" class="zoom"
+              ><img
+                src="../images/desktop-overview.png"
+                alt="服务器网络助手桌面面板，显示联网状态、隧道累计流量、系统代理和本机出口"
+                loading="lazy"
+                width="1280"
+                height="1000"
+            /></a>
+            <figcaption>
+              <b>图 3.</b> 面板每 30
+              秒刷新。流量是当前运行周期的累计值，不是实时网速。
+            </figcaption>
+          </figure>
+          <p>
+            窗口关闭后隧道继续运行。“断开连接”只控制选中的 WireGuard
+            服务，不删除配置。新建方案、切换出口和完整清理仍使用管理台。它是一个网络状态面板，不包含
+            Clash 的订阅管理、规则编辑或系统托盘菜单。
+          </p>
+        </section>
+        <section id="recovery">
+          <p class="section-number">05 / RECOVERY MATTERS</p>
+          <h2>把“回到原来”，也做成一条路径。</h2>
+          <p>
+            改变默认流量路径时，最不应该丢掉的是回来的路。客户端切换前会保留管理路由，并设置确认窗口。复检失败时触发回退；维护检查持续失败时也会停用共享。
+          </p>
+          <div class="recovery-flow">
+            <span>记录原状态</span><b>→</b><span>配置与切换</span><b>→</b
+            ><span>确认可用</span><b>／</b><span class="restore">失败回退</span>
+          </div>
+          <p>
+            完整结束共享，请在管理台点击“断开并恢复原网络”。它会清理本方案的隧道、临时路由、转发资源和代理配置。如果清理失败，界面会保留错误状态，恢复记录也会留在节点上，便于重试。
+          </p>
+          <aside class="callout">
+            <strong>Windows 出口的实际约束</strong>
+            <p>
+              WinNAT 只支持一个内部 NAT 前缀。程序遇到已有 NAT 会拒绝新建，保留
+              WSL、Docker 或 Hyper-V 原来的网络。Windows
+              出口和代理共享是新增功能；自动化验证不能代替你自己的四种系统组合实机验收。<a
+                href="https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/setup-nat-network"
+                >微软 WinNAT 文档 ↗</a
+              >
+            </p>
+          </aside>
+          <p>
+            对于我们，这个项目的价值不是再增加一个“已连接”的标记，而是把连接背后的路径和退出方式都交代清楚。这样下一次网络失灵时，排查可以从证据开始。
+          </p>
+        </section>
+        <section id="further">
+          <p class="section-number">06 / KEEP EXPLORING</p>
+          <h2>文章到这里，项目继续更新。</h2>
+          <p>
+            博客记录这次实践和设计选择；GitHub
+            维护最新安装步骤、功能边界与代码。如果两处说明出现差异，以对应版本的仓库文档为准。
+          </p>
+          <div class="reading-links">
+            <a href="https://github.com/2667741708/server-network-assist"
+              ><strong>项目源码与 README</strong
+              ><span>安装、使用案例和更新记录 ↗</span></a
+            ><a
+              href="https://github.com/2667741708/server-network-assist/blob/main/docs/SHARING.md"
+              ><strong>跨平台共享与代理指南</strong
+              ><span>能力矩阵、作用范围、回退与验证 ↗</span></a
+            ><a
+              href="https://github.com/2667741708/server-network-assist/blob/main/docs/DESKTOP.md"
+              ><strong>桌面面板指南</strong
+              ><span>快捷方式、权限、安装与升级 ↗</span></a
+            >
+          </div>
+          <details class="references">
+            <summary>排版与行文参考</summary>
+            <p>
+              参考
+              <a href="https://www.joshwcomeau.com/blog/how-i-built-my-blog-v2/"
+                >Josh W. Comeau 的博客实现文章</a
+              >中把交互示例放进讲解的方式、<a href="https://overreacted.io/"
+                >Overreacted</a
+              >用标题、日期与短摘要组织内容的方式，以及
+              <a href="https://www.paulgraham.com/articles.html"
+                >Paul Graham 的文章索引</a
+              >所体现的正文优先思路。本页文章、图示和样式为本项目制作，未搬运这些站点的文章、品牌素材或源码。
+            </p>
+          </details>
+        </section>
+        <footer class="article-footer">
+          <a class="brand" href="#article">网络手记 <span>↗</span></a>
+          <p>连接有路径，操作有回退。</p>
+          <a href="https://github.com/2667741708/server-network-assist/issues"
+            >反馈问题 ↗</a
+          >
+        </footer>
+      </main>
+    </div>
+    <dialog id="image-viewer" aria-label="查看截图原图">
+      <button id="close-image" type="button">关闭 ✕</button
+      ><img id="full-image" alt="" />
+      <p id="image-caption"></p>
+    </dialog>
+  </body>
+</html>

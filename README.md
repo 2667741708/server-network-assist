@@ -1,6 +1,6 @@
 # Server Network Assist
 
-一个面向小型实验室、工作室和家庭机房的自托管服务器网络协作台。它通过你明确添加的 SSH 主机执行连通性探测，让 Windows 或 Ubuntu/Linux 客户端经联网的 Ubuntu/Linux 出口机使用 WireGuard 访问公网；Windows 使用原生网络栈，无需 WSL。断开后恢复原有路由，继续使用校园网认证、热点或本机网络。
+一个面向小型实验室、工作室和家庭机房的自托管服务器网络协作台。它通过你明确添加的 SSH 主机执行连通性探测，让 Windows 或 Ubuntu/Linux 客户端经 Windows 或 Ubuntu/Linux 出口机使用 WireGuard 访问公网；Windows 使用原生网络栈，无需 WSL。可选择仅共享网络，或同时共享源机器的 HTTP/HTTPS 应用代理。断开后恢复原有路由与本方案修改的代理设置。
 
 > 当前版本为 `0.2.0-alpha`。网络切换属于高风险运维操作，请先在可现场恢复的测试机上验证。不要把管理台直接暴露到公网。
 
@@ -16,6 +16,10 @@
 - 本地加密凭据库、CSRF/Origin 防护、会话撤销、审计日志与 WebAuthn 通行密钥
 - Angular Material 响应式界面，桌面、平板和手机均可使用
 - 本机桌面面板：独立窗口、桌面快捷方式、隧道连接开关、握手与流量、Windows 系统代理诊断
+- Windows 原生 WinNAT 出口；Windows/Ubuntu 四种方向的共享配置
+- 源 HTTP/HTTPS 代理按需共享，通过隧道中继，修改前记录恢复信息
+
+图文原理、交互路径示意和完整实践文章见 [项目博客](docs/blog/README.md)（本地打开 `docs/blog/index.html`）。新增共享能力的前提、作用范围与验证边界见 [跨平台共享与代理指南](docs/SHARING.md)。
 
 ## 桌面面板
 
@@ -64,7 +68,9 @@
 
 [![Windows 和 Ubuntu 混合借网方案：三台主机的探测结果及待启用的方案设置](docs/images/mixed-network-profile.png)](docs/images/mixed-network-profile.png)
 
-出口机目前需要 Ubuntu/Linux，暂不支持 Windows 出口机。端口、防火墙、保留路由和自动回退的细节见 [网络借助指南](docs/NETWORK_ASSIST.md)。
+这个示例使用 Ubuntu 出口；也可选择具备原生 WireGuard 和 WinNAT 的 Windows 出口。Windows 出口检测到已有 NAT 时会拒绝创建，保留 WSL/Docker 等原网络。新功能的系统前提和验证边界见 [跨平台共享指南](docs/SHARING.md)。
+
+方案中还可选择“同时共享 HTTP/HTTPS 代理”：填写源机器的代理 IPv4/端口，客户端通过隧道访问它。Windows 修改 SSH 用户的系统代理；Ubuntu 配置新登录 shell、APT 和该用户已登录的 GNOME 会话，断开时恢复。默认“不共享源代理”保留客户端原有代理；这个选项不会绕过源机器的 VPN/TUN，也不会复制订阅、PAC 或认证信息。
 
 ### 案例三：从桌面查看和控制已有隧道
 
@@ -83,7 +89,7 @@
 
 ## 快速开始
 
-要求：Windows 或 Linux 管理节点、Python 3.11+。被管理主机需要 SSH。Ubuntu/Linux 借网节点需要 systemd、WireGuard、`iproute2` 和 `iptables`；Windows 客户端需要 WireGuard for Windows、PowerShell 5.1+ 和管理员 SSH 账号。Windows 出口机暂不支持。
+要求：Windows 或 Linux 管理节点、Python 3.11+。被管理主机需要 SSH。Ubuntu/Linux 借网节点需要 systemd、WireGuard、`iproute2` 和 `iptables`；Windows 节点需要 WireGuard for Windows、PowerShell 5.1+ 和管理员 SSH 账号，作为出口还需要 WinNAT。升级后请为所有参与节点重新安装当前辅助程序。
 
 Windows 原生安装、代理故障定位与回退见 [Windows 与 Ubuntu 兼容说明](docs/WINDOWS.md)。`v0.1.0` 发布包是旧版，不包含当前 Windows 支持和桌面面板；体验本文功能请从当前源码安装。
 

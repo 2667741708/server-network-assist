@@ -8,6 +8,7 @@ The PNG files in this directory are browser captures of the project's shipped UI
 | `mixed-network-profile.png` | An Ubuntu gateway and Windows/Ubuntu clients in a profile before activation |
 | `desktop-overview.png` | A healthy local desktop status overview |
 | `disconnect-confirmation.png` | The confirmation dialog, captured without confirming the operation |
+| `proxy-sharing.png` | The optional upstream HTTP/HTTPS proxy sharing fields, before saving or enabling |
 
 ## Reproduce
 

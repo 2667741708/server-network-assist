@@ -313,6 +313,8 @@ async def network_enable_profile(state, profile_id):
     profile = state.network.get(profile_id)
     if not profile:
         raise ValueError('借网方案不存在')
+    if profile.get('cleanup_pending'):
+        raise ValueError('上次回退尚未完成，请先重试断开并恢复原网络')
     for other in state.network.profiles():
         if other['id'] == profile_id or other['state'] in ('disabled', 'error'):
             continue
@@ -325,10 +327,12 @@ async def network_enable_profile(state, profile_id):
     gateway_enabled = False
     try:
         gateway_probe = await network_probe_host(state, profile['gateway_id'])
-        if not gateway_probe['internet']:
+        if not gateway_probe.get('ssh'):
+            raise ValueError('出口机 SSH 不可达')
+        if profile.get('proxy_mode', 'direct') == 'direct' and not gateway_probe['internet']:
             raise ValueError('所选出口机当前未通过公网探测，已拒绝切换客户端路由')
         if not gateway_probe.get('gateway_supported', gateway_probe.get('os') == 'Linux'):
-            raise ValueError('出口机需要 Ubuntu/Linux；Windows 支持原生借网客户端')
+            raise ValueError('出口机缺少转发能力：Ubuntu/Linux 需要 WireGuard，Windows 需要原生 WireGuard 和 WinNAT')
         node_ids = [profile['gateway_id'], *profile['client_ids']]
         probes = await asyncio.gather(*(network_probe_host(state, value) for value in node_ids))
         missing = [p['name'] for p in probes if not p['helper']]
@@ -341,25 +345,30 @@ async def network_enable_profile(state, profile_id):
         await _network_remote(state, profile['gateway_id'], 'configure', gateway_payload)
         await asyncio.gather(*(_network_remote(state, node, 'configure', client_payloads[node])
                                for node in profile['client_ids']))
-        await _network_remote(state, profile['gateway_id'], 'enable', None, profile_id, '0')
         gateway_enabled = True
+        await _network_remote(state, profile['gateway_id'], 'enable', None, profile_id, '0')
         for node in profile['client_ids']:
-            await _network_remote(state, node, 'enable', None, profile_id, '120')
             enabled_clients.append(node)
+            await _network_remote(state, node, 'enable', None, profile_id, '120')
             check = await network_probe_host(state, node)
-            if not check['ssh'] or not check['internet']:
+            if not check['ssh'] or (profile.get('proxy_mode', 'direct') == 'direct' and not check['internet']):
                 raise ValueError(f"{state.host(node)['name']} 切换后未通过 SSH 和公网复检，正在回退")
+            await _network_remote(state, node, 'verify', None, profile_id)
             await _network_remote(state, node, 'confirm', None, profile_id)
         result = state.network.set_state(profile_id, 'enabled')
         state.audit('network_assist_enabled', profile['name'])
         return result
     except Exception as exc:
-        await asyncio.gather(*(_network_remote(state, node, 'disable', None, profile_id)
+        cleanup = await asyncio.gather(*(_network_remote(state, node, 'disable', None, profile_id)
                                for node in enabled_clients), return_exceptions=True)
         if gateway_enabled:
-            await asyncio.gather(_network_remote(state, profile['gateway_id'], 'disable', None, profile_id),
-                                 return_exceptions=True)
-        state.network.set_state(profile_id, 'error', str(exc))
+            cleanup += await asyncio.gather(_network_remote(state, profile['gateway_id'], 'disable', None, profile_id),
+                                           return_exceptions=True)
+        failures = [str(v) for v in cleanup if isinstance(v, Exception)]
+        detail = str(exc) + ('；回退尚未完成，请重试断开：' + '；'.join(failures) if failures else '')
+        failed = state.network.set_state(profile_id, 'error', detail)
+        failed['cleanup_pending'] = bool(failures)
+        state.network.put(failed)
         raise
 
 
@@ -374,9 +383,13 @@ async def network_disable_profile(state, profile_id):
                                    return_exceptions=True)
     failures = [str(v) for v in [*results, *gateway] if isinstance(v, Exception)]
     if failures:
-        state.network.set_state(profile_id, 'error', '；'.join(failures))
+        failed = state.network.set_state(profile_id, 'error', '；'.join(failures))
+        failed['cleanup_pending'] = True
+        state.network.put(failed)
         raise ValueError('部分主机未完成回退：' + '；'.join(failures))
     result = state.network.set_state(profile_id, 'disabled')
+    result['cleanup_pending'] = False
+    state.network.put(result)
     state.audit('network_assist_disabled', profile['name'])
     return result
 

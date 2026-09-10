@@ -27,6 +27,10 @@ export interface Host {
 }
 
 export interface NetworkProfile {
+  cleanup_pending?: boolean;
+  proxy_mode?: 'direct' | 'share';
+  proxy_host?: string;
+  proxy_port?: number;
   id: string;
   name: string;
   gateway_id: string;

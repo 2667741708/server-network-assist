@@ -52,5 +52,6 @@ if (Test-Path -LiteralPath $helper) {
     dns = $dns; internet = $direct; system_internet = $system
     proxy_enabled = $proxyEnabled; diagnosis = $diagnosis
     default_route = $routeText; http_code = $(if ($direct) { '200' } else { '000' })
-    helper = $helperReady; assist = $assist; client_supported = $true; gateway_supported = $false
+    helper = $helperReady; assist = $assist; client_supported = $true
+    gateway_supported = [bool](Get-Command New-NetNat -ErrorAction SilentlyContinue)
 } | ConvertTo-Json -Depth 8 -Compress

@@ -42,3 +42,5 @@ jobs:
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check_windows_scripts.ps1
       - if: runner.os == 'Windows'
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_windows_helper.ps1
+      - if: runner.os == 'Windows'
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_windows_gateway.ps1

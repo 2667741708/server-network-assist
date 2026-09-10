@@ -8,7 +8,10 @@
 | SSH / DNS / 直连公网探测 | 原生 PowerShell | sh / getent / curl 或 wget |
 | 系统代理诊断 | 比较直连与当前 SSH 用户的系统代理请求 | 当前探测绕过代理 |
 | 借网客户端 | WireGuard Windows 服务 | wg-quick / systemd |
-| 借网出口机 | 暂不支持 | iptables / IPv4 转发 |
+| 借网出口机 | 原生 WireGuard / WinNAT（须无已有 NAT 冲突） | iptables / IPv4 转发 |
+| 可选 HTTP/HTTPS 代理共享 | 隧道内 portproxy 中继；客户端修改 SSH 用户系统代理 | 标准库中继；客户端设置新登录 shell、APT、已登录 GNOME 会话 |
+
+新增四种共享方向的前提、代理作用范围及验证边界见 [SHARING.md](SHARING.md)。这不等于全部系统版本均支持 WinNAT，或四种组合都已经做过实机验收。
 
 Windows 探测先识别原生系统；即便 PATH 中存在 WSL 的 sh，也不会把 Windows 网络诊断送进 WSL。管理台通过 SFTP 上传临时探测脚本，执行后删除；探测不修改路由或代理。SSH 用户与桌面用户不同时，系统代理结果仅代表 SSH 用户，不能推断所有用户的浏览器状态。
 
@@ -38,7 +41,7 @@ Copy-Item -LiteralPath '.\src\server_network_assist\windows_helper.ps1' -Destina
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\ServerNetworkAssist\windows_helper.ps1 bootstrap
 ```
 
-选择 Ubuntu/Linux 作为出口，Windows 作为客户端。辅助程序使用两个 IPv4 `/1` 路由，不删除原默认路由；先保存 endpoint 和 SSH 控制路由，再启用原生 WireGuard 服务。Windows 的 DNS 仅配置在隧道网卡上，使用 `223.5.5.5` 和 `1.1.1.1`；物理网卡 DNS 保留。现有 `/1` 全隧道路由会阻止启用新方案，避免与已有 VPN 争抢公网路由。
+选择符合前提的 Ubuntu/Linux 或 Windows 作为出口，Windows 作为客户端。辅助程序使用两个 IPv4 `/1` 路由，不删除原默认路由；先保存 endpoint 和 SSH 控制路由，再启用原生 WireGuard 服务。Windows 的 DNS 仅配置在隧道网卡上，使用 `223.5.5.5` 和 `1.1.1.1`；物理网卡 DNS 保留。现有 `/1` 全隧道路由会阻止启用新方案，避免与已有 VPN 争抢公网路由。
 
 启用前注册 120 秒回退计划任务；复检成功才取消。启用维护时每分钟检查隧道来源地址的公网 TCP 连通性，连续 6 次失败停用并恢复；开机维护先恢复控制路由再启动服务。关闭维护时重启后不会自动启动隧道。实现使用官方 [Windows tunnel service 接口](https://github.com/WireGuard/wireguard-windows/blob/master/docs/enterprise.md)。
 
@@ -65,4 +68,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_windows_hel
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-本轮验证包含 Titan 原生 Windows 的真实网络请求、helper bootstrap、密钥生成、配置生成、现有隧道冲突拒绝及停用；Ubuntu 实机直连探测；模拟部分路由创建失败和清理失败时的恢复记录。未在 Titan 上切换现有工作隧道，也未做重启验收。
+此前桌面/客户端版本验证包含 Titan 原生 Windows 的真实网络请求、helper bootstrap、密钥生成、配置生成、现有隧道冲突拒绝及停用；Ubuntu 实机直连探测；模拟部分路由创建失败和清理失败时的恢复记录。未在 Titan 上切换现有工作隧道，也未做重启验收。新增 Windows 出口和代理共享的测试范围另见 [SHARING.md](SHARING.md#验收记录与建议)，不要将此前证据视为新功能实机验收。

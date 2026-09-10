@@ -12,7 +12,17 @@ import { Host, NetworkProfile, ProbeResult } from './models';
 
 @Component({
   selector: 'app-network',
-  styles: [`.probe-heading { display: grid; gap: .5rem; } .probe-heading > * { min-width: 0; }`],
+  styles: [
+    `
+      .probe-heading {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .probe-heading > * {
+        min-width: 0;
+      }
+    `,
+  ],
   imports: [
     FormsModule,
     MatButtonModule,
@@ -42,7 +52,10 @@ import { Host, NetworkProfile, ProbeResult } from './models';
       <div class="section-title">
         <div>
           <h2>连通性检查</h2>
-          <p>支持 Windows 与 Ubuntu。分别检查 SSH、DNS 和直连公网；Windows 额外检查系统代理。出口机使用 Ubuntu/Linux。</p>
+          <p>
+            Windows 与 Ubuntu 均可作为出口机或客户端。Windows 出口需要
+            WinNAT；共享代理时，启用过程会额外验证代理路径。
+          </p>
         </div>
       </div>
       <div class="probe-grid">
@@ -63,7 +76,10 @@ import { Host, NetworkProfile, ProbeResult } from './models';
             </div>
             <p class="long-value">{{ result(host.id)?.os }}</p>
             @if (result(host.id)?.diagnosis === 'system_proxy_failed') {
-              <p class="alert error long-value">直连正常，但系统代理请求失败。请检查 Windows 设置中的代理或代理客户端，浏览器可能因此无法联网。</p>
+              <p class="alert error long-value">
+                直连正常，但系统代理请求失败。请检查 Windows
+                设置中的代理或代理客户端，浏览器可能因此无法联网。
+              </p>
             }
             @if (result(host.id)?.diagnosis === 'proxy_only') {
               <p class="long-value">仅系统代理可联网，直连出口不可用。</p>
@@ -122,6 +138,9 @@ import { Host, NetworkProfile, ProbeResult } from './models';
               }
             </mat-select></mat-form-field
           >
+          <p class="wide long-value">
+            出口：{{ hostName(draft.gateway_id) || '未选择' }}；客户端：{{ selectedClientNames }}
+          </p>
           <mat-form-field appearance="outline"
             ><mat-label>客户端</mat-label
             ><mat-select multiple [(ngModel)]="draft.client_ids">
@@ -146,6 +165,33 @@ import { Host, NetworkProfile, ProbeResult } from './models';
             ><mat-label>切换后仍走原网络的 CIDR（空格或逗号分隔）</mat-label
             ><textarea matInput rows="3" [(ngModel)]="preserveText"></textarea>
           </mat-form-field>
+          <mat-form-field appearance="outline" class="wide">
+            <mat-label>是否共享源机器的代理</mat-label>
+            <mat-select [(ngModel)]="draft.proxy_mode">
+              <mat-option value="direct">仅共享网络，不共享源代理</mat-option>
+              <mat-option value="share">共享网络，同时共享 HTTP/HTTPS 代理</mat-option>
+            </mat-select>
+          </mat-form-field>
+          @if (draft.proxy_mode === 'share') {
+            <mat-form-field appearance="outline"
+              ><mat-label>源机器上的 HTTP 代理 IPv4</mat-label
+              ><input matInput [(ngModel)]="draft.proxy_host" placeholder="127.0.0.1"
+            /></mat-form-field>
+            <mat-form-field appearance="outline"
+              ><mat-label>源代理端口</mat-label
+              ><input matInput type="number" [(ngModel)]="draft.proxy_port"
+            /></mat-form-field>
+            <p class="wide long-value">
+              通过 WireGuard 隧道转发到源机器的 HTTP/混合代理端口（支持 HTTPS CONNECT）。Windows
+              设置 SSH 用户的系统代理；Ubuntu 设置新登录 shell、APT 和该用户已登录的 GNOME
+              会话。断开后恢复。请使用无账号密码的源代理端口。
+            </p>
+          } @else {
+            <p class="wide long-value">
+              保留客户端现有代理设置，不复制源机器的应用代理。源机器的 VPN/TUN
+              属于系统路由，本开关不会绕过或关闭它。
+            </p>
+          }
         </div>
         <mat-checkbox [(ngModel)]="draft.maintenance"
           >每分钟维护隧道，连续失败后自动断开并恢复原路由</mat-checkbox
@@ -162,10 +208,17 @@ import { Host, NetworkProfile, ProbeResult } from './models';
           >
             安装辅助程序
           </button>
-          @if (draft.state === 'enabled') {
+          @if (draft.state === 'enabled' || draft.state === 'error') {
             <button mat-flat-button class="danger-bg" (click)="disable()">断开并恢复原网络</button>
-          } @else {
-            <button mat-flat-button (click)="enable()" [disabled]="!draft.id">启用借网</button>
+          }
+          @if (draft.state !== 'enabled') {
+            <button
+              mat-flat-button
+              (click)="enable()"
+              [disabled]="!draft.id || draft.cleanup_pending"
+            >
+              启用借网
+            </button>
           }
           <button mat-button class="danger" (click)="remove()" [disabled]="!draft.id || active">
             删除
@@ -190,8 +243,11 @@ export class NetworkComponent {
   get clientChoices() {
     return this.hosts.filter((value) => value.id !== this.draft.gateway_id);
   }
+  get selectedClientNames() {
+    return this.draft.client_ids.map((id) => this.hostName(id)).join('、') || '未选择';
+  }
   get active() {
-    return !['disabled', 'error'].includes(this.draft.state);
+    return this.draft.cleanup_pending || !['disabled', 'error'].includes(this.draft.state);
   }
   emptyProfile(): NetworkProfile {
     return {
@@ -204,6 +260,9 @@ export class NetworkComponent {
       tunnel_cidr: '',
       preserve_routes: [],
       maintenance: true,
+      proxy_mode: 'direct',
+      proxy_host: '127.0.0.1',
+      proxy_port: 7897,
       state: 'disabled',
       updated_at: 0,
       interface: '',
@@ -239,6 +298,9 @@ export class NetworkComponent {
   }
   edit(profile: NetworkProfile) {
     this.draft = {
+      proxy_mode: 'direct',
+      proxy_host: '127.0.0.1',
+      proxy_port: 7897,
       ...profile,
       client_ids: [...profile.client_ids],
       preserve_routes: [...profile.preserve_routes],

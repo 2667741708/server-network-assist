@@ -187,6 +187,8 @@ class NetworkStore:
                 raise ValueError("该出口机的 UDP 端口已被另一个借网方案使用")
         endpoint = self._endpoint(str(payload.get("endpoint", "") or hosts[gateway_id]["address"]))
         old = self.get(profile_id)
+        if old and old.get('cleanup_pending'):
+            raise ValueError('上次回退尚未完成，请先重试断开并恢复原网络')
         cidr_text = str(payload.get("tunnel_cidr", "")).strip() or (old["tunnel_cidr"] if old else self._next_subnet())
         try:
             subnet = ipaddress.ip_network(cidr_text, strict=True)
@@ -212,15 +214,29 @@ class NetworkStore:
             except ValueError as exc:
                 raise ValueError(f"保留路由无效：{value}") from exc
         state = old.get("state", "disabled") if old else "disabled"
+        proxy_mode = str(payload.get('proxy_mode', 'direct'))
+        if proxy_mode not in ('direct', 'share'):
+            raise ValueError('代理模式必须为仅共享网络或同时共享代理')
+        proxy_host = str(payload.get('proxy_host', '127.0.0.1')).strip()
+        try:
+            proxy_address = ipaddress.ip_address(proxy_host)
+            if proxy_address.version != 4 or proxy_address.is_unspecified or proxy_address.is_multicast:
+                raise ValueError()
+        except ValueError as exc:
+            raise ValueError('源代理地址必须为明确的 IPv4 地址，如 127.0.0.1') from exc
+        proxy_port = int(payload.get('proxy_port', 7897))
+        if not 1 <= proxy_port <= 65535:
+            raise ValueError('源代理端口必须为 1–65535')
         if old and state not in ("disabled", "error"):
-            immutable = (gateway_id, client_ids, port, endpoint, str(subnet))
-            previous = (old["gateway_id"], old["client_ids"], old["port"], old["endpoint"], old["tunnel_cidr"])
+            immutable = (gateway_id, client_ids, port, endpoint, str(subnet), checked, proxy_mode, proxy_host, proxy_port)
+            previous = (old["gateway_id"], old["client_ids"], old["port"], old["endpoint"], old["tunnel_cidr"], old['preserve_routes'], old.get('proxy_mode', 'direct'), old.get('proxy_host', '127.0.0.1'), old.get('proxy_port', 7897))
             if immutable != previous:
-                raise ValueError("请先断开借网，再修改出口、客户端、端口或网段")
+                raise ValueError("请先断开借网，再修改出口、客户端、端口、网段、保留路由或代理方式")
         profile = {"id": profile_id, "name": name, "gateway_id": gateway_id,
                    "client_ids": client_ids, "port": port, "endpoint": endpoint,
                    "tunnel_cidr": str(subnet), "preserve_routes": checked,
                    "maintenance": bool(payload.get("maintenance", True)),
+                   "proxy_mode": proxy_mode, "proxy_host": proxy_host, "proxy_port": proxy_port,
                    "state": state, "updated_at": int(time.time()),
                    "interface": interface_name(profile_id),
                    "last_error": old.get("last_error", "") if old else ""}
@@ -244,6 +260,8 @@ class NetworkStore:
         profile = self.get(profile_id)
         if not profile:
             return
+        if profile.get('cleanup_pending'):
+            raise ValueError('回退尚未完成，不能删除恢复方案')
         if profile["state"] not in ("disabled", "error"):
             raise ValueError("请先断开借网再删除方案")
         with self.state.connect() as db:
@@ -258,6 +276,10 @@ class NetworkStore:
                    "role": "gateway", "address": f"{gateway_ip}/{prefix}",
                    "subnet": str(subnet), "port": profile["port"],
                    "maintenance": profile["maintenance"], "peers": []}
+        proxy = {"proxy_mode": profile.get('proxy_mode', 'direct'),
+                 "proxy_host": profile.get('proxy_host', '127.0.0.1'),
+                 "proxy_port": profile.get('proxy_port', 7897), "relay_port": 17897}
+        gateway.update(proxy)
         clients = {}
         for index, client_id in enumerate(profile["client_ids"], 1):
             client_ip = str(addresses[index])
@@ -273,4 +295,5 @@ class NetworkStore:
                 "gateway_public_key": public_keys[profile["gateway_id"]],
                 "preserve_routes": list(dict.fromkeys(control)),
                 "maintenance": profile["maintenance"]}
+            clients[client_id].update(proxy)
         return gateway, clients
