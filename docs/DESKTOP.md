@@ -1,5 +1,9 @@
 # 桌面面板
 
+桌面 UI 采用 Framework7 9.1.3 的现成 iOS 组件，包含本地提供的样式、默认配色与 MIT 授权。外观按钮切换深浅模式并记住选择；长主机名、隧道名和代理地址自动换行。来源与复现步骤见 [UI 来源说明](UI_SOURCES.md)。
+
+已有 `0.2.0` Windows 安装可使用 `scripts/prepare_desktop_ui_update.py` 准备只含桌面 UI 与静态资源路由的更新包，再在目标机器以管理员运行 `update_desktop_ui.ps1 -Source <暂存目录> -ExpectedHostname <已核对的主机名>`。更新前备份旧文件，只重启桌面面板任务，保留 WireGuard 连接；完成后重新打开原桌面快捷方式。完整程序升级仍按下面的安装方法操作。
+
 v0.2.0 提供一个面向本机网络的桌面窗口。它直接读取 Windows WireGuard 服务或 Ubuntu 的 `wg-quick@` 服务，适合已经有工作隧道、需要日常查看状态和连接开关的电脑。多主机配置、SSH 管理和创建新借网方案仍使用原有服务器管理台。
 
 ## 使用

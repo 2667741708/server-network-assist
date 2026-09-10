@@ -17,6 +17,7 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     for (const [name,width,height] of [['desktop',1200,940],['mobile',390,844]]) {
       const page = await browser.newPage({viewport:{width,height}});
       const errors = []; page.on('pageerror', e => errors.push(e.message));
+      page.on('console', message => {if(message.type()==='error') errors.push(message.text().slice(0,250))});
       let active = true;
       await page.route('**/api/status', route => route.fulfill({json:{hostname:'TITAN-WINDOWS',platform:'Windows',version:'0.2.0',timestamp:Math.floor(Date.now()/1000),elevated:true,direct:{ok:true,milliseconds:138},system:{ok:true,milliseconds:152},proxy:{enabled:false,server:'',pac:false},routes:[{adapter:'Ethernet 2',gateway:'192.0.2.1',metric:100}],tunnels:[{name:'fleet-titan',active,addresses:['192.0.2.20'],received:498345632,sent:32255662,handshake:Math.floor(Date.now()/1000)-26,endpoint:'192.0.2.10:51909',telemetry:true}]}}));
       await page.route('**/api/action', route => { const body=route.request().postDataJSON(); active=body.action==='connect'; return route.fulfill({json:{ok:true}}); });
@@ -33,6 +34,20 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1)) throw new Error('Horizontal overflow');
       if (errors.length) throw new Error(errors.join('\n'));
       await page.screenshot({path:path.join(root,'artifacts',`desktop-panel-${name}.png`),fullPage:true});
+      await page.getByRole('button',{name:'切换深浅主题'}).click();
+      if (!await page.locator('html').evaluate(e=>e.classList.contains('dark'))) throw new Error('Dark theme did not activate');
+      await page.reload();
+      await page.getByRole('heading',{name:'网络已就绪',exact:true}).waitFor();
+      if (!await page.locator('html').evaluate(e=>e.classList.contains('dark'))) throw new Error('Theme did not persist');
+      await page.screenshot({path:path.join(root,'artifacts',`desktop-panel-${name}-dark.png`),fullPage:true});
+      await page.evaluate(() => {
+        document.querySelector('.tunnel h3').textContent = 'titan-Windows-Ubuntu-very-long-tunnel-identifier-without-spaces-0123456789';
+        document.querySelector('#proxy-address').textContent = 'http=192.0.2.123:17897;https=192.0.2.123:17897;long-proxy-diagnostic-value';
+      });
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1)) throw new Error('Long values overflow');
+      for (const selector of ['.tunnel h3','#proxy-address']) {
+        if (!await page.locator(selector).evaluate(e=>e.scrollWidth<=e.clientWidth+1 && e.scrollHeight<=e.clientHeight+1)) throw new Error('Truncated long value: '+selector);
+      }
       await page.close();
       console.log(`${name}: local desktop panel, connection actions, cancel and layout passed`);
     }

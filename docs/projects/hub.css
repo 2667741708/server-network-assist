@@ -1,0 +1,23 @@
+/* Framework7 owns visual styling; these adapters preserve document flow and full text. */
+html,body{height:auto;overflow:auto}
+.view,.page{position:relative;height:auto;overflow:visible}
+.navbar{position:fixed;top:0}
+.page-content{height:auto;overflow:visible;max-width:1080px;margin-inline:auto}
+.navbar-inner{max-width:1080px;margin-inline:auto;left:0;right:0}
+.item-inner,.item-title,.item-subtitle,.item-text,.item-footer,.block-title,.button{white-space:normal!important;overflow-wrap:anywhere}
+.list .item-text{display:block;-webkit-line-clamp:unset;max-height:none}
+.list .item-title{text-overflow:clip}
+.block-title{line-height:1.4}
+.button{height:auto;min-height:var(--f7-button-height)}
+.actions,.reading,.meta{display:flex;flex-wrap:wrap;gap:16px}
+.project-article{max-width:780px;margin-inline:auto}
+.project-article section{margin-block:36px}
+.steps li{margin-block:16px}
+[hidden]{display:none!important}
+.skip:not(:focus){position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden}
+.skip:focus{position:relative;z-index:1000}
+/* Keep the native checkbox focusable under the prebuilt checkbox decoration. */
+label.item-checkbox{position:relative}
+label.item-checkbox input[type=checkbox]{display:block;position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;z-index:1}
+label.item-checkbox:focus-within{outline:2px solid var(--f7-theme-color);outline-offset:2px}
+@media print{.navbar,.filters{display:none}}

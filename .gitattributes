@@ -14,3 +14,7 @@
 *.js text eol=lf
 *.cjs text eol=lf
 *.ico binary
+docs/vendor/framework7/* -text
+docs/projects/vendor/framework7/* -text
+src/server_network_assist/desktop_ui/framework7-bundle.min.css -text
+src/server_network_assist/desktop_ui/FRAMEWORK7-LICENSE.txt -text

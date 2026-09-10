@@ -1,0 +1,12 @@
+{
+  "name": "framework7",
+  "version": "9.1.3",
+  "license": "MIT",
+  "source": "https://registry.npmjs.org/framework7/-/framework7-9.1.3.tgz",
+  "integrity": "sha512-1HCK58FbplWdKpHpSiF38H0UaAiCHpGA421ArxMopd5cvKbFg9TD22htYfNZw217QNgSKcw2FDcodUjXfGgOFg==",
+  "files": {
+    "framework7-bundle.min.css": "c15481a2c46c180dd27114a1af1e5cb496ee09432eb0ef189b13017cbd95b4b0",
+    "framework7-bundle.min.js": "f5dc74c16c6e98778fb40a65e26656508e343caae7600d1efe077ac3cb4c465f",
+    "LICENSE": "1c115994b4470862e1fa6d694a326f5d745dd8e77027a5ab18e7c285b05fa59e"
+  }
+}

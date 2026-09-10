@@ -1,17 +1,27 @@
 <!doctype html>
-<html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务器网络助手</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/desktop.css"><script src="/desktop.js" defer></script></head>
+<html lang="zh-CN" class="ios">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务器网络助手</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/framework7-bundle.min.css"><link rel="stylesheet" href="/framework7-default-theme.css"><link rel="stylesheet" href="/desktop.css"><script src="/desktop.js" defer></script></head>
 <body>
-<aside><div class="brand"><img src="/icon.svg" alt=""><div>网络助手<small>SERVER NETWORK ASSIST</small></div></div><div class="nav active"><span>◉</span> 本机网络</div><div class="aside-bottom"><span class="dot"></span> 本地运行 · 数据留在本机<div id="version"></div></div></aside>
-<main>
-<header><div><p class="eyebrow">NETWORK OVERVIEW</p><h1>让连接，一目了然。</h1><p class="muted"><span id="hostname">正在识别本机</span><span id="platform"></span></p></div><button id="refresh" class="secondary">↻ 刷新状态</button></header>
-<div id="notice" role="status" hidden></div>
-<section class="hero"><div><div class="hero-label"><span id="network-dot" class="dot"></span><span id="network-label">正在检测网络</span></div><h2 id="network-title">连接状态检查中…</h2><p id="network-description">分别检测本机直连和系统应用的网络路径。</p></div><div class="signal" aria-hidden="true"><i></i><i></i><i></i><i></i></div></section>
-<section class="stats"><article><span>直连公网</span><strong id="direct">检测中</strong><small id="latency">检查真实 HTTPS 请求</small></article><article><span>系统应用联网</span><strong id="system">检测中</strong><small>使用当前用户的代理设置</small></article><article><span>隧道总流量</span><strong id="traffic">—</strong><small id="traffic-detail">当前会话累计流量</small></article></section>
-<div class="section-heading"><div><h2>WireGuard 隧道</h2><p>管理本机已有连接，网络配置保持在原位置。</p></div><span id="tunnel-count" class="pill">读取中</span></div>
-<section id="tunnels" aria-live="polite"><div class="empty">正在读取 Windows / Ubuntu 原生隧道…</div></section>
-<section class="bottom-grid"><article class="card"><div class="section-heading"><h2>系统代理</h2><span id="proxy-state" class="pill">—</span></div><p id="proxy-address" class="mono">—</p><p id="proxy-description" class="muted">系统代理可能影响浏览器，但不会代表隧道本身的状态。</p><button id="disable-proxy" class="secondary" disabled>关闭手动代理</button></article><article class="card"><h2>本机出口</h2><div id="routes" class="route-list">正在读取路由…</div><p id="permission" class="muted"></p></article></section>
-<footer><span>仅监听本机回环地址 · 无需 WSL</span><span id="updated">等待首次检测</span></footer>
-</main>
-<dialog id="confirm-dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-text"></p><div class="dialog-actions"><button id="cancel" class="secondary">取消</button><button id="accept">确认</button></div></dialog>
+<!-- Framework7 official app layout, cards, list views and dialog markup (MIT). See THIRD_PARTY.md. -->
+<div id="app"><div class="view view-main"><div class="page page-current">
+<header class="navbar"><div class="navbar-bg"></div><nav class="navbar-inner" aria-label="面板操作"><div class="left"><button id="theme" class="button" aria-label="切换深浅主题">外观</button></div><div class="title">网络助手</div><div class="right"><button id="refresh" class="button">↻ 刷新状态</button></div></nav></header>
+<main class="page-content">
+<div class="block"><h1>本机网络</h1><p><span id="hostname">正在识别本机</span> · <span id="platform"></span></p></div>
+<div id="notice" class="block block-strong inset" role="status" hidden></div>
+<section class="hero card"><div class="card-content card-content-padding"><p><span id="network-dot" class="badge color-green" aria-hidden="true">●</span> <span id="network-label">正在检测网络</span></p><h2 id="network-title">连接状态检查中…</h2><p id="network-description">分别检测本机直连和系统应用的网络路径。</p></div></section>
+<div class="block-title">连接概览</div>
+<section class="list list-strong list-dividers inset" aria-label="连接概览"><ul>
+<li class="item-content"><div class="item-inner"><div class="item-title">直连公网<div class="item-footer" id="latency">检查真实 HTTPS 请求</div></div><div class="item-after" id="direct">检测中</div></div></li>
+<li class="item-content"><div class="item-inner"><div class="item-title">系统应用联网<div class="item-footer">使用当前用户的代理设置</div></div><div class="item-after" id="system">检测中</div></div></li>
+<li class="item-content"><div class="item-inner"><div class="item-title">隧道总流量<div class="item-footer" id="traffic-detail">当前会话累计流量</div></div><div class="item-after" id="traffic">—</div></div></li>
+</ul></section>
+<div class="block"><h2>WireGuard 隧道</h2><p>管理本机已有连接，网络配置保持在原位置。</p><p id="tunnel-count">读取中</p></div>
+<section id="tunnels" aria-live="polite"><div class="block">正在读取 Windows / Ubuntu 原生隧道…</div></section>
+<div class="grid grid-cols-1 medium-grid-cols-2">
+<section class="card"><div class="card-header">系统代理 <span id="proxy-state" class="badge">—</span></div><div class="card-content card-content-padding"><p id="proxy-address" class="mono">—</p><p id="proxy-description">系统代理可能影响浏览器，但不会代表隧道本身的状态。</p><button id="disable-proxy" class="button button-outline" disabled>关闭手动代理</button></div></section>
+<section class="card"><div class="card-header">本机出口</div><div class="card-content card-content-padding"><div id="routes" class="route-list">正在读取路由…</div><p id="permission"></p></div></section>
+</div>
+<footer class="block"><p>仅监听本机回环地址 · 无需 WSL · <span id="version"></span></p><p id="updated">等待首次检测</p><p>界面组件：Framework7 iOS · <a href="/THIRD_PARTY.md" target="_blank" rel="noopener">开源授权</a></p></footer>
+</main></div></div></div>
+<dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text"><div class="dialog-inner"><h2 id="confirm-title" class="dialog-title">确认操作</h2><p id="confirm-text" class="dialog-text"></p></div><div class="dialog-buttons"><button id="cancel" class="dialog-button">取消</button><button id="accept" class="dialog-button dialog-button-bold">确认</button></div></dialog>
 </body></html>

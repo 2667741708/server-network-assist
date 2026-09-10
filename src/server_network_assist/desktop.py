@@ -161,7 +161,7 @@ def handler_for(panel: Panel):
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
             self.end_headers()
             with contextlib.suppress(BrokenPipeError, ConnectionResetError):
                 self.wfile.write(body)
@@ -174,6 +174,10 @@ def handler_for(panel: Panel):
         def do_GET(self):
             assets = {'/': ('index.html', 'text/html; charset=utf-8'),
                       '/desktop.css': ('desktop.css', 'text/css'),
+                      '/framework7-bundle.min.css': ('framework7-bundle.min.css', 'text/css'),
+                      '/framework7-default-theme.css': ('framework7-default-theme.css', 'text/css'),
+                      '/THIRD_PARTY.md': ('THIRD_PARTY.md', 'text/plain; charset=utf-8'),
+                      '/FRAMEWORK7-LICENSE.txt': ('FRAMEWORK7-LICENSE.txt', 'text/plain; charset=utf-8'),
                       '/desktop.js': ('desktop.js', 'text/javascript'),
                       '/icon.svg': ('icon.svg', 'image/svg+xml')}
             if self.path in assets:

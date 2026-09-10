@@ -1,0 +1,33 @@
+{
+  "server-network-assist": {
+    "title": "让 Windows 与 Ubuntu，共用一条网络",
+    "summary": "从原生应用与 WSL 的联网差异出发，介绍跨平台网络共享、代理选择和可回退设计。",
+    "category": "网络与运维",
+    "kind": "完整教程",
+    "article": "network-assist",
+    "featured": true
+  },
+  "gateway-resilience-guardian": {
+    "title": "网络自愈，从分清故障层开始",
+    "summary": "物理网络、校园网认证、WireGuard、代理 TUN 与下游共享网络的分层恢复实践。",
+    "category": "网络与运维",
+    "kind": "完整教程",
+    "guide_url": "https://whm12.art/network-resilience/",
+    "featured": true
+  },
+  "reliable-ssh-mcp": {"category": "开发工具", "title": "Reliable SSH MCP：结构化远程操作"},
+  "codex-jialichuang-mcp": {"category": "开发工具"},
+  "codex-markdown-math-patch": {"category": "开发工具"},
+  "svc-spider": {"category": "开发工具"},
+  "svc-vscode-extension": {"category": "开发工具"},
+  "Trace-Engine": {"category": "开发工具"},
+  "VibeHub": {"category": "开发工具"},
+  "SRSE": {"category": "机器学习"},
+  "PALS-SOFT-Branch10": {"category": "机器学习"},
+  "adaptive-ssl-fusion": {"category": "机器学习"},
+  "lingtour": {"category": "数字人与文旅"},
+  "ling-shan-digital-guide": {"category": "数字人与文旅"},
+  "greenstar": {"category": "数字人与文旅"},
+  "local-3d-avatar-modeling-pipeline": {"category": "三维制作"},
+  "-3D-": {"category": "三维制作"}
+}
