@@ -1,6 +1,8 @@
 # Server Network Assist
 
-Server Network Assist is a self-hosted console for SSH inventory, layered reachability checks, browser terminals, and reversible WireGuard-based Internet sharing between Linux servers.
+Server Network Assist is a self-hosted console for SSH inventory, layered reachability checks, browser terminals, and reversible WireGuard-based Internet sharing for Windows and Ubuntu/Linux clients with a Linux gateway.
+
+Version 0.2.0 adds a local desktop panel. Run `server-network-assist-desktop` to open a standalone browser app window with local tunnel controls, traffic, handshake and system-proxy diagnostics. The Windows installer creates a desktop shortcut and a protected offline runtime; no WSL is required. See the [desktop guide](docs/DESKTOP.md).
 
 It probes only hosts explicitly configured through SSH. A server without Internet access can temporarily route public traffic through a selected gateway. Disabling assistance removes the tunnel and temporary routes so the client can return to its campus login, hotspot, or original local uplink.
 

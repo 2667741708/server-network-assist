@@ -25,7 +25,10 @@ jobs:
       - run: npm run build
 
   backend:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,3 +38,7 @@ jobs:
       - run: python -m pip install .
       - run: python -m unittest discover -s tests -v
       - run: python -m compileall -q src
+      - if: runner.os == 'Windows'
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check_windows_scripts.ps1
+      - if: runner.os == 'Windows'
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_windows_helper.ps1

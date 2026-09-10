@@ -2,9 +2,10 @@
 
 ## 支持范围
 
-- 管理节点：Python 3.11+，推荐 Ubuntu 22.04/24.04 或 Debian 12/13
+- 管理节点：Windows 或 Linux，Python 3.11+
 - 被管理主机：OpenSSH Server
-- 网络借助：Linux、systemd、WireGuard、`iproute2`、`iptables`、`sudo`
+- 出口机及 Linux 客户端：systemd、WireGuard、`iproute2`、`iptables`、`sudo`
+- Windows 客户端：原生 WireGuard、PowerShell 5.1+、已提权管理员 SSH；无需 WSL，见 [Windows 安装](WINDOWS.md)
 - 当前仅管理 IPv4 公网借助；暂不自动修改 nftables-only、防火墙管理器或 NetworkManager 配置
 
 ## 普通用户安装

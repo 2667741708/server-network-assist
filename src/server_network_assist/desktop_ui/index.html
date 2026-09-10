@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务器网络助手</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/desktop.css"><script src="/desktop.js" defer></script></head>
+<body>
+<aside><div class="brand"><img src="/icon.svg" alt=""><div>网络助手<small>SERVER NETWORK ASSIST</small></div></div><div class="nav active"><span>◉</span> 本机网络</div><div class="aside-bottom"><span class="dot"></span> 本地运行 · 数据留在本机<div id="version"></div></div></aside>
+<main>
+<header><div><p class="eyebrow">NETWORK OVERVIEW</p><h1>让连接，一目了然。</h1><p class="muted"><span id="hostname">正在识别本机</span><span id="platform"></span></p></div><button id="refresh" class="secondary">↻ 刷新状态</button></header>
+<div id="notice" role="status" hidden></div>
+<section class="hero"><div><div class="hero-label"><span id="network-dot" class="dot"></span><span id="network-label">正在检测网络</span></div><h2 id="network-title">连接状态检查中…</h2><p id="network-description">分别检测本机直连和系统应用的网络路径。</p></div><div class="signal" aria-hidden="true"><i></i><i></i><i></i><i></i></div></section>
+<section class="stats"><article><span>直连公网</span><strong id="direct">检测中</strong><small id="latency">检查真实 HTTPS 请求</small></article><article><span>系统应用联网</span><strong id="system">检测中</strong><small>使用当前用户的代理设置</small></article><article><span>隧道总流量</span><strong id="traffic">—</strong><small id="traffic-detail">当前会话累计流量</small></article></section>
+<div class="section-heading"><div><h2>WireGuard 隧道</h2><p>管理本机已有连接，网络配置保持在原位置。</p></div><span id="tunnel-count" class="pill">读取中</span></div>
+<section id="tunnels" aria-live="polite"><div class="empty">正在读取 Windows / Ubuntu 原生隧道…</div></section>
+<section class="bottom-grid"><article class="card"><div class="section-heading"><h2>系统代理</h2><span id="proxy-state" class="pill">—</span></div><p id="proxy-address" class="mono">—</p><p id="proxy-description" class="muted">系统代理可能影响浏览器，但不会代表隧道本身的状态。</p><button id="disable-proxy" class="secondary" disabled>关闭手动代理</button></article><article class="card"><h2>本机出口</h2><div id="routes" class="route-list">正在读取路由…</div><p id="permission" class="muted"></p></article></section>
+<footer><span>仅监听本机回环地址 · 无需 WSL</span><span id="updated">等待首次检测</span></footer>
+</main>
+<dialog id="confirm-dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-text"></p><div class="dialog-actions"><button id="cancel" class="secondary">取消</button><button id="accept">确认</button></div></dialog>
+</body></html>

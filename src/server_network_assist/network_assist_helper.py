@@ -159,7 +159,7 @@ def wg_config(p):
             f"PostDown = iptables -w 3 -t nat -D POSTROUTING -s {subnet} -o {uplink} -m comment --comment {tag} -j MASQUERADE || true"]
         for peer in p.get("peers", []):
             allowed = ipaddress.ip_network(peer["allowed_ip"], strict=True)
-            if allowed.version != 4 or allowed.prefixlen != 32 or allowed not in subnet:
+            if allowed.version != 4 or allowed.prefixlen != 32 or not allowed.subnet_of(subnet):
                 raise ValueError("invalid gateway peer address")
             if not re.fullmatch(r"[A-Za-z0-9+/]{42,44}={0,2}", str(peer.get("public_key", ""))):
                 raise ValueError("invalid peer key")

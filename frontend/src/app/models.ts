@@ -54,6 +54,11 @@ export interface ProbeResult {
   os: string;
   default_route: string;
   http_code: string;
+  system_internet?: boolean | null;
+  proxy_enabled?: boolean;
+  diagnosis?: string;
+  client_supported?: boolean;
+  gateway_supported?: boolean;
   error: string;
 }
 

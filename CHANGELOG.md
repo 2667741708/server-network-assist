@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 - 2026-09-10
+
+- Add a local desktop panel with an independent app window, desktop shortcut, WireGuard status and connection controls.
+- Compare direct HTTPS with system-proxy connectivity and back up manual proxy settings before disabling them.
+- Add an offline Windows desktop installer with a protected embedded runtime, on-demand background task and per-user state permissions.
+- Support native Windows network probes and WireGuard clients without WSL; retain Ubuntu/Linux gateways.
+- Add scheduled failsafe recovery, route ownership journaling and full-tunnel conflict protection for Windows clients.
+- Fix Linux gateway peer subnet validation; add Windows/Linux CI and desktop API/UI tests.
+
 ## 0.1.0 - 2026-09-10
 
 - Initial public alpha structure

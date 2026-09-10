@@ -1,8 +1,8 @@
 # Server Network Assist
 
-一个面向小型实验室、工作室和家庭机房的自托管服务器网络协作台。它通过你明确添加的 SSH 主机执行只读连通性探测，并可让暂时无法访问公网的 Linux 服务器，经另一台联网服务器的 WireGuard 隧道访问网络；断开后恢复原有默认路由，继续使用校园网认证、热点或本机网络。
+一个面向小型实验室、工作室和家庭机房的自托管服务器网络协作台。它通过你明确添加的 SSH 主机执行连通性探测，让 Windows 或 Ubuntu/Linux 客户端经联网的 Ubuntu/Linux 出口机使用 WireGuard 访问公网；Windows 使用原生网络栈，无需 WSL。断开后恢复原有路由，继续使用校园网认证、热点或本机网络。
 
-> 当前版本为 `0.1.0-alpha`。网络切换属于高风险运维操作，请先在可现场恢复的测试机上验证。不要把管理台直接暴露到公网。
+> 当前版本为 `0.2.0-alpha`。网络切换属于高风险运维操作，请先在可现场恢复的测试机上验证。不要把管理台直接暴露到公网。
 
 ## 功能
 
@@ -15,10 +15,19 @@
 - Xterm.js 网页终端，支持可选 tmux 持久会话
 - 本地加密凭据库、CSRF/Origin 防护、会话撤销、审计日志与 WebAuthn 通行密钥
 - Angular Material 响应式界面，桌面、平板和手机均可使用
+- 本机桌面面板：独立窗口、桌面快捷方式、隧道连接开关、握手与流量、Windows 系统代理诊断
+
+## 桌面面板
+
+安装后运行 `server-network-assist-desktop`。Windows 可通过安装程序创建“服务器网络助手”桌面快捷方式，双击即开；支持直接控制已经安装的 WireGuard 隧道。窗口关闭不会断开网络。面板所有资源本地提供，无需 WSL，也无需额外桌面运行库。
+
+完整安装、升级及使用方式见 [桌面面板指南](docs/DESKTOP.md)。
 
 ## 快速开始
 
-要求：Linux 管理节点、Python 3.11+。被管理主机需要 SSH；使用借网功能时还需要 systemd、WireGuard、`iproute2` 和 `iptables`。
+要求：Windows 或 Linux 管理节点、Python 3.11+。被管理主机需要 SSH。Ubuntu/Linux 借网节点需要 systemd、WireGuard、`iproute2` 和 `iptables`；Windows 客户端需要 WireGuard for Windows、PowerShell 5.1+ 和管理员 SSH 账号。Windows 出口机暂不支持。
+
+Windows 原生安装、代理故障定位与回退见 [Windows 与 Ubuntu 兼容说明](docs/WINDOWS.md)。下方 `v0.1.0` 发布包是旧版；本次 Windows 支持需要从当前源码安装。
 
 直接安装 `v0.1.0` 预发行 wheel：
 

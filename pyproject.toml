@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "server-network-assist"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-hosted SSH inventory, network reachability and reversible WireGuard gateway console"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Web Environment",
   "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
   "Topic :: System :: Networking",
 ]
@@ -33,6 +34,9 @@ Issues = "https://github.com/2667741708/server-network-assist/issues"
 [project.scripts]
 server-network-assist = "server_network_assist.cli:main"
 
+[project.gui-scripts]
+server-network-assist-desktop = "server_network_assist.desktop:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
@@ -40,7 +44,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-server_network_assist = ["ui/*", "ui/**/*"]
+server_network_assist = ["ui/*", "ui/**/*", "*.ps1", "desktop_ui/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

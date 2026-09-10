@@ -29,7 +29,8 @@ from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, ResidentKe
 
 from .legacy import Panel, initialize, ROOT
 from .network_assist import (HELPER as NETWORK_HELPER, NetworkStore,
-                             helper_command, parse_probe, probe_command)
+                             helper_command, parse_probe, probe_command,
+                             detect_platform, windows_file_command, WINDOWS_HELPER)
 from .auth import hash_password, token_digest, verify_password
 
 
@@ -233,9 +234,22 @@ async def network_probe_host(state, host_id):
         raise ValueError('主机不存在')
     try:
         async with state.operations, ssh_route(state, host_id) as connection:
-            result = await connection.run(probe_command(), timeout=20, check=False)
+            platform = await detect_platform(connection)
+            if platform == 'windows':
+                async with connection.start_sftp_client() as sftp:
+                    home = await sftp.realpath('.')
+                    temporary = home.rstrip('/') + '/sna-probe-' + secrets.token_hex(8) + '.ps1'
+                    try:
+                        await sftp.put(str(ROOT / 'windows_probe.ps1'), temporary)
+                        result = await connection.run(windows_file_command(temporary), timeout=45, check=False)
+                    finally:
+                        with contextlib.suppress(Exception):
+                            await sftp.remove(temporary)
+            else:
+                result = await connection.run(probe_command(), timeout=20, check=False)
         value = parse_probe(result.stdout, result.exit_status)
-        value.update(id=host_id, name=host['name'], address=host['address'], error='')
+        error = (result.stderr or '远端探测失败')[:1000] if result.exit_status else ''
+        value.update(id=host_id, name=host['name'], address=host['address'], error=error)
         return value
     except Exception as exc:
         message = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
@@ -252,6 +266,25 @@ async def network_install_helper(state, host_id):
     source = ROOT / 'network_assist_helper.py'
     temporary = f'/tmp/server-network-assist-{secrets.token_hex(8)}'
     async with state.operations, ssh_route(state, host_id) as connection:
+        platform = await detect_platform(connection)
+        if platform == 'windows':
+            # A short native command creates the destination; never invoke sudo/WSL.
+            result = await connection.run(
+                'powershell.exe -NoProfile -NonInteractive -Command "[IO.Directory]::CreateDirectory(\'C:/ProgramData/ServerNetworkAssist\') | Out-Null"',
+                timeout=15, check=False)
+            if result.exit_status:
+                raise ValueError('Windows 安装需要已提权的管理员 SSH 账号')
+            result = await connection.run(
+                'icacls.exe C:\\ProgramData\\ServerNetworkAssist /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"',
+                timeout=15, check=False)
+            if result.exit_status:
+                raise ValueError('Windows 辅助程序目录权限设置失败')
+            async with connection.start_sftp_client() as sftp:
+                await sftp.put(str(ROOT / 'windows_helper.ps1'), WINDOWS_HELPER)
+            result = await connection.run(helper_command('bootstrap', platform='windows'), timeout=45, check=False)
+            value = _remote_json(result)
+            state.audit('network_helper_installed', host['name'])
+            return value
         try:
             sftp = await connection.start_sftp_client()
             await sftp.put(str(source), temporary)
@@ -271,7 +304,8 @@ async def network_install_helper(state, host_id):
 
 async def _network_remote(state, host_id, action, payload=None, *args, timeout=60):
     async with state.operations, ssh_route(state, host_id) as connection:
-        result = await connection.run(helper_command(action, payload, *args), timeout=timeout, check=False)
+        platform = await detect_platform(connection)
+        result = await connection.run(helper_command(action, payload, *args, platform=platform), timeout=timeout, check=False)
     return _remote_json(result)
 
 
@@ -293,6 +327,8 @@ async def network_enable_profile(state, profile_id):
         gateway_probe = await network_probe_host(state, profile['gateway_id'])
         if not gateway_probe['internet']:
             raise ValueError('所选出口机当前未通过公网探测，已拒绝切换客户端路由')
+        if not gateway_probe.get('gateway_supported', gateway_probe.get('os') == 'Linux'):
+            raise ValueError('出口机需要 Ubuntu/Linux；Windows 支持原生借网客户端')
         node_ids = [profile['gateway_id'], *profile['client_ids']]
         probes = await asyncio.gather(*(network_probe_host(state, value) for value in node_ids))
         missing = [p['name'] for p in probes if not p['helper']]

@@ -18,6 +18,34 @@ import time
 
 
 HELPER = "/usr/local/sbin/server-network-assist-helper"
+WINDOWS_HELPER = 'C:/ProgramData/ServerNetworkAssist/windows_helper.ps1'
+
+
+def windows_file_command(path: str, *args: str) -> str:
+    """File invocation understood by both cmd.exe and PowerShell SSH shells."""
+    path = path.replace('\\', '/')
+    if path.startswith('/') and len(path) > 3 and path[2] == ':':
+        path = path[1:]
+    if not re.fullmatch(r'[A-Za-z]:/[^"\r\n`$%]*', path):
+        raise ValueError('Windows script path is not an absolute safe path')
+    if any(not re.fullmatch(r'[a-zA-Z0-9_=/+-]+', str(v)) for v in args):
+        raise ValueError('Invalid Windows helper argument')
+    return ('powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
+            + path + '"' + ''.join(' ' + str(v) for v in args))
+
+
+async def detect_platform(connection) -> str:
+    # A Linux/WSL SSH session may launch powershell.exe through interop.
+    # Conversely, Git's uname on Windows reports MINGW/MSYS, not Linux.
+    result = await connection.run('uname -s', timeout=10, check=False)
+    if result.exit_status == 0 and result.stdout.strip() == 'Linux':
+        return 'linux'
+    result = await connection.run(
+        'powershell.exe -NoProfile -NonInteractive -Command "[Environment]::OSVersion.Platform.ToString()"',
+        timeout=10, check=False)
+    if result.exit_status == 0 and result.stdout.strip() == 'Win32NT':
+        return 'windows'
+    raise ValueError('无法识别远端系统；目前支持 Windows 与 Ubuntu/Linux')
 PROBE_SCRIPT = r'''set -u
 os="$(uname -s 2>/dev/null || printf unknown)"
 host="$(hostname 2>/dev/null || printf unknown)"
@@ -44,7 +72,19 @@ fi'''
 def parse_probe(output: str, exit_status: int = 0) -> dict:
     result = {"ssh": exit_status == 0, "dns": False, "internet": False,
               "helper": False, "hostname": "", "os": "", "default_route": "",
-              "http_code": "000", "assist": []}
+              "http_code": "000", "assist": [], "system_internet": None,
+              "proxy_enabled": False, "diagnosis": "",
+              "client_supported": False, "gateway_supported": False}
+    if output.lstrip().startswith('{'):
+        try:
+            value = json.loads(output)
+            for key in result:
+                if key in value:
+                    result[key] = value[key]
+            result['ssh'] = exit_status == 0
+            return result
+        except (ValueError, TypeError):
+            pass
     for line in output.splitlines():
         if line.startswith("assist_json="):
             try:
@@ -60,6 +100,8 @@ def parse_probe(output: str, exit_status: int = 0) -> dict:
             result[key] = value == "1"
         elif key in result:
             result[key] = value[:1000]
+    result['client_supported'] = result['os'] == 'Linux'
+    result['gateway_supported'] = result['os'] == 'Linux'
     return result
 
 
@@ -67,7 +109,7 @@ def probe_command() -> str:
     return "sh -lc " + shlex.quote(PROBE_SCRIPT)
 
 
-def helper_command(action: str, payload: dict | None = None, *args: str) -> str:
+def helper_command(action: str, payload: dict | None = None, *args: str, platform='linux') -> str:
     if not re.fullmatch(r"[a-z-]+", action):
         raise ValueError("辅助程序操作无效")
     command = ["sudo", "-n", HELPER, action]
@@ -75,6 +117,8 @@ def helper_command(action: str, payload: dict | None = None, *args: str) -> str:
         encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
         command.append(encoded)
     command.extend(str(v) for v in args)
+    if platform == 'windows':
+        return windows_file_command(WINDOWS_HELPER, *command[3:])
     return shlex.join(command)
 
 

@@ -12,6 +12,7 @@ import { Host, NetworkProfile, ProbeResult } from './models';
 
 @Component({
   selector: 'app-network',
+  styles: [`.probe-heading { display: grid; gap: .5rem; } .probe-heading > * { min-width: 0; }`],
   imports: [
     FormsModule,
     MatButtonModule,
@@ -41,22 +42,32 @@ import { Host, NetworkProfile, ProbeResult } from './models';
       <div class="section-title">
         <div>
           <h2>连通性检查</h2>
-          <p>SSH、DNS 与 HTTPS 公网探测分开显示，避免把“能登录”误判成“能联网”。</p>
+          <p>支持 Windows 与 Ubuntu。分别检查 SSH、DNS 和直连公网；Windows 额外检查系统代理。出口机使用 Ubuntu/Linux。</p>
         </div>
       </div>
       <div class="probe-grid">
         @for (host of hosts; track host.id) {
           <mat-card class="probe-card"
-            ><div class="row-between">
+            ><div class="probe-heading">
               <strong class="long-value">{{ host.name }}</strong
               ><span class="mono long-value">{{ host.address }}</span>
             </div>
             <div class="probe-status">
               <span [class.ok]="result(host.id)?.ssh">SSH</span
               ><span [class.ok]="result(host.id)?.dns">DNS</span
-              ><span [class.ok]="result(host.id)?.internet">公网</span
+              ><span [class.ok]="result(host.id)?.internet">直连公网</span
               ><span [class.ok]="result(host.id)?.helper">辅助程序</span>
+              @if (result(host.id)?.os === 'Windows') {
+                <span [class.ok]="result(host.id)?.system_internet">系统应用联网</span>
+              }
             </div>
+            <p class="long-value">{{ result(host.id)?.os }}</p>
+            @if (result(host.id)?.diagnosis === 'system_proxy_failed') {
+              <p class="alert error long-value">直连正常，但系统代理请求失败。请检查 Windows 设置中的代理或代理客户端，浏览器可能因此无法联网。</p>
+            }
+            @if (result(host.id)?.diagnosis === 'proxy_only') {
+              <p class="long-value">仅系统代理可联网，直连出口不可用。</p>
+            }
             <p class="long-value">
               {{ result(host.id)?.error || result(host.id)?.default_route || '尚未探测' }}
             </p>
