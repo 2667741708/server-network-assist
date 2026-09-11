@@ -34,3 +34,19 @@ python -m unittest discover -s tests -p test_project_deployment.py -v
 ```
 
 准备脚本仅打包已完成的 `site/blog/dist`。每次部署仍需重新获取当前 Caddyfile SHA，并先运行发布脚本的 `--dry-run`。发布脚本在完整公网校验失败时自动恢复配置与 current 链接。
+
+## Cloud 管理台与 Codex 对话部署
+
+2026-09-11 14:35（Asia/Shanghai），管理台 `0.4.0` 已部署到 cloud，并通过现有 `whm12.art` HTTPS 站点提供入口：<https://whm12.art/network-assist/>。
+
+| 检查 | 结果 |
+| --- | --- |
+| 固定发布代码 | Git 提交 `6899e97`；上传 wheel SHA256 为 `67bcb18279e2d2aff9c9ffe84e93fa876a898e78414def3f750d814774594f93` |
+| 服务隔离 | `server-network-assist.service` 使用专用系统账号，仅监听 `127.0.0.1:9180`；公网由 Caddy HTTPS 转发 |
+| 路径部署 | 返回的 HTML 为 `<base href="/network-assist/">`；主脚本、样式和 `/api/session` 均为 HTTP 200 |
+| 登录与主机库 | 生产管理员登录返回 200；导入 4 个已锁定指纹的 SSH 入口：两台 C201、d408、d321-titan |
+| 状态探测 | 生产 API 能返回逐机 SSH、公网与 Codex CLI 状态；失败保留具体错误，不伪报在线 |
+| Caddy 变更 | 修改前 SHA256 `2dad44862dcae8d971d8e0cbf92dad8ed066f7cf6128834b9bda7a60dbd796bc`，修改后 `7304628ce772c14a1ea56edad7cb67e3cc38169346b3956f6625bd45a7d00fc3` |
+| 回滚文件 | `/var/backups/server-network-assist/Caddyfile.before-a73254e`；删除新增路由并重载 Caddy 即可撤销公网入口 |
+
+公网探测时，`c201-4090-wg` 的 SSH、公网和 Codex CLI 均可用；其他机器按当时链路状态显示不可达或未安装 Codex。一次只读 Codex 端到端测试已从管理台到达远端 CLI，但远端连接模型服务时发生 TLS 握手中断，管理台正确记录为失败；这属于远端 Codex 上游连接状态，不应写成对话成功。
