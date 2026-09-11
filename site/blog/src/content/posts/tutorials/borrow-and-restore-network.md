@@ -12,7 +12,45 @@ draft: false
 tags: [Windows, Ubuntu, WireGuard, 使用教程]
 ---
 
-借网是让客户端通过另一台机器访问公网；退网则恢复客户端自己的网络。**临时断开、禁用开机借网、注销校园网账号，是三个不同的操作。** 这篇文章把命令和面板入口放在一起，便于按实际部署选择。
+## 借网 / 退网命令速查
+
+**在已配置 SSH 别名的管理机执行，按目标机器选择命令。** 以下对应本文已部署的 d408 和 Titan；代码块可直接复制，长命令可横向滚动。
+
+**1. d408 — 借网**
+
+```bash
+ssh -t d408 'sudo /usr/local/sbin/d408-network enable'
+```
+
+**2. d408 — 退网，同时禁用自动启动**
+
+```bash
+ssh -t d408 'sudo bash /home/d408/stop-borrowing.sh'
+```
+
+**3. d408 — 借网成功后，启用开机借网**
+
+```bash
+ssh -t d408 'sudo systemctl enable d408-network-boot.service'
+```
+
+**4. Titan — 恢复借网及原启动配置**
+
+```text
+ssh d321-titan 'C:/ProgramData/ServerNetworkAssist/desktop/0.3.1/python.exe C:/ProgramData/ServerNetworkAssist/campus-recovery/local_sharing.py restore-startup fleet-titan'
+```
+
+**5. Titan — 退网，同时禁用自动启动**
+
+```text
+ssh d321-titan 'C:/ProgramData/ServerNetworkAssist/desktop/0.3.1/python.exe C:/ProgramData/ServerNetworkAssist/campus-recovery/local_sharing.py pause-sharing fleet-titan'
+```
+
+Titan 需保持桌面后台运行，并使用有权访问其数据目录的 SSH 用户；恢复依赖上次暂停保存的记录，原来自动启动且运行才恢复到该状态。d408 退网保留经 `c201-5080-wg` 的 SSH 跳板访问。若需注销客户端自己的校园网账号，应在仍走物理网络时完成，再借网。
+
+## 操作前先了解范围
+
+借网是让客户端通过另一台机器访问公网；退网则恢复客户端自己的网络。**临时断开、禁用开机借网、注销校园网账号，是三个不同的操作。** 下面保留完整面板教程、流程图与验证步骤。
 
 这里使用两台已部署机器作为案例：Titan 是 Windows 原生客户端，d408 是 Ubuntu 客户端。可以从任何具有 SSH 访问权限的管理机发起操作，但命令最终在目标客户端执行。首次使用本项目的读者，请先完成“用面板首次配置”一节，不能把案例路径直接套到新机器。
 
