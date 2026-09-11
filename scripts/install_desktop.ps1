@@ -3,7 +3,7 @@ param(
     [string]$Wheel,
     [string]$PackageArchive,
     [string]$PackageSha256,
-    [string]$Version = '0.3.0'
+    [string]$Version = '0.3.1'
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -17,7 +17,7 @@ if ($PackageArchive) {
     if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $PackageSha256) { throw 'Package hash mismatch' }
 } elseif ($Wheel -and $Version -eq '0.2.0') {
     $archivePath = (Resolve-Path -LiteralPath $Wheel).Path
-} else { throw 'Version 0.3.0 requires the full offline PackageArchive and PackageSha256' }
+} else { throw 'This version requires the full offline PackageArchive and PackageSha256' }
 $stdlib = Get-ChildItem -LiteralPath $source -Filter 'python3*.zip' -File | Select-Object -First 1
 if (-not $stdlib -or -not (Test-Path -LiteralPath (Join-Path $source 'pythonw.exe'))) { throw 'Use a Windows embeddable Python runtime containing python3xx.zip and pythonw.exe' }
 $base = 'C:\ProgramData\ServerNetworkAssist\desktop'

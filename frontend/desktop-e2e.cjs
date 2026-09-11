@@ -28,15 +28,19 @@ const longName='Titan-Windows-Ubuntu-很长的主机名称与出口标识-012345
       const page=await browser.newPage({viewport:{width,height}});
       const errors=[];page.on('pageerror',e=>errors.push(e.message));
       let active=true, proxy={supported:true,enabled:false,server:'',bypass:'<local>',scope:'Windows 当前用户',pac:false};
-      let backups=[], credentials=[], hosts=[], profiles=[], mutationCalls=[];
+      let backups=[], credentials=[], hosts=[], profiles=[], mutationCalls=[], recovery=[], startMode='Automatic';
+      const campusCurrent={state:'online',online:true,account:'test-campus-account',service:'校园网',ip:'192.0.2.20',internet_online:true};
       const now=Math.floor(Date.now()/1000);
       await page.route('**/api/**',async route=>{
         const request=route.request(),endpoint=new URL(request.url()).pathname.replace('/api/',''),body=request.method()==='POST'?request.postDataJSON():{};
         assert.equal(request.headers()['x-desktop-token'],state.token);
         if(request.method()==='POST')mutationCalls.push({endpoint,body});
         const send=json=>route.fulfill({json});
-        if(endpoint==='status')return send({hostname:longName,platform:'Windows',version:'0.3.0',timestamp:now,elevated:true,direct:{ok:true,milliseconds:138},system:{ok:true,milliseconds:152},proxy,routes:[{adapter:'Ethernet-long-adapter-网络适配器-012345678901234567890',gateway:'192.0.2.1',metric:100}],tunnels:[{name:longName,active,addresses:['192.0.2.20'],received:498345632,sent:32255662,handshake:now-26,endpoint:'192.0.2.10:51909'}],traffic:{available:true,received_per_second:2048,sent_per_second:1024,history:[{timestamp:now-10,received_per_second:4096,sent_per_second:512},{timestamp:now-5,received_per_second:2048,sent_per_second:1024}]},background:{running:true,tray_available:true,tray_running:true,notifications_enabled:true}});
-        if(endpoint==='action'){if(body.action==='disable-proxy'){backups.push({id:'backup-1',created_at:now,platform:'Windows',compatible:true});proxy.enabled=false;}else active=body.action==='connect';return send({ok:true});}
+        if(endpoint==='status')return send({hostname:longName,platform:'Windows',version:'0.3.1',timestamp:now,elevated:true,direct:{ok:true,milliseconds:138},system:{ok:true,milliseconds:152},proxy,recovery,routes:[{adapter:'Ethernet-long-adapter-网络适配器-012345678901234567890',gateway:'192.0.2.1',metric:100}],tunnels:[{name:longName,active,start_mode:startMode,service_state:active?'Running':'Stopped',addresses:['192.0.2.20'],received:498345632,sent:32255662,handshake:now-26,endpoint:'192.0.2.10:51909'}],traffic:{available:true,received_per_second:2048,sent_per_second:1024,history:[{timestamp:now-10,received_per_second:4096,sent_per_second:512},{timestamp:now-5,received_per_second:2048,sent_per_second:1024}]},background:{running:true,tray_available:true,tray_running:true,notifications_enabled:true}});
+        if(endpoint==='action'){if(body.action==='disable-proxy'){backups.push({id:'backup-1',created_at:now,platform:'Windows',compatible:true});proxy.enabled=false;}else if(body.action==='pause-sharing'){active=false;startMode='Disabled';recovery=[{name:longName,state:'paused',start_mode:'Automatic',was_active:true}];}else if(body.action==='restore-startup'){active=true;startMode='Automatic';recovery=[];}else active=body.action==='connect';return send({ok:true});}
+        if(endpoint==='campus')return send({configured:true});
+        if(endpoint==='campus/status')return send(campusCurrent);
+        if(endpoint==='campus/login'){assert.equal(active,false);assert.equal(body.service,'0');assert.equal(body.physical_network_confirmed,true);return send({ok:true,verified:true,current:campusCurrent,message:'已核对当前校园网账号与输入账号一致。'});}
         if(endpoint==='fleet/hosts')return send({hosts});
         if(endpoint==='fleet/credentials')return send({credentials});
         if(endpoint==='fleet/network')return send({profiles});
@@ -67,9 +71,14 @@ const longName='Titan-Windows-Ubuntu-很长的主机名称与出口标识-012345
       await page.locator('#traffic-chart svg').waitFor();await checkLayout('overview');
       await page.screenshot({path:path.join(root,'artifacts',`desktop-panel-${name}.png`),fullPage:true});
       await nav('tunnel-page');
-      await page.getByRole('button',{name:'断开连接',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(active,true);
-      await page.getByRole('button',{name:'断开连接',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();await settled('隧道操作已完成');assert.equal(active,false);
+      await page.getByRole('button',{name:'临时断开',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(active,true);
+      await page.getByRole('button',{name:'临时断开',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();await settled('隧道操作已完成');assert.equal(active,false);
       await page.getByRole('button',{name:'连接',exact:true}).click();await settled('隧道操作已完成');assert.equal(active,true);await checkLayout('tunnels');
+      await page.getByRole('button',{name:'停止借网并禁用自动启动',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();await settled('已停止本机借网');assert.equal(active,false);assert.equal(await page.getByRole('button',{name:'连接',exact:true}).isDisabled(),true);
+      await page.locator('#campus-check').click();await settled('脚本安装状态已更新');
+      await page.locator('#campus-username').fill('test-campus-account');await page.locator('#campus-password').fill('not-a-real-secret');await page.locator('#campus-physical').check();await page.getByRole('button',{name:'使用此账号登录校园网',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();await settled('已核对当前校园网账号');assert.equal(await page.locator('#campus-password').inputValue(),'');assert.match(await page.locator('#campus-state').innerText(),/test-campus-account/);
+      await page.locator('#campus-status').click();await settled('只读查询已完成');await checkLayout('campus');await page.screenshot({path:path.join(root,'artifacts',`desktop-campus-${name}.png`),fullPage:true});
+      await page.getByRole('button',{name:'恢复原借网服务配置',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();await settled('隧道操作已完成');assert.equal(active,true);
       await nav('hosts-page');await page.locator('#credential-name').fill('主机连接凭据');await page.locator('#credential-password').fill('test-password-not-real');await page.getByRole('button',{name:'保存凭据',exact:true}).click();await settled('凭据已加密保存');assert.equal(await page.locator('#credential-password').inputValue(),'');
       for(const [hostName,address]of [[longName,'192.0.2.10'],['Ubuntu 客户端','192.0.2.20']]){
         await page.getByRole('button',{name:'添加主机',exact:true}).click();await page.locator('#host-name').fill(hostName);await page.locator('#host-address').fill(address);await page.locator('#host-username').fill('operator');await page.locator('#host-credential_id').selectOption('credential-1');await page.getByRole('button',{name:'保存主机',exact:true}).click();await settled('主机已保存');

@@ -67,6 +67,28 @@ class DesktopTests(unittest.TestCase):
             self.request('/api/action', {'action':'run','command':'anything'})
         self.assertEqual(result.exception.code, 400)
 
+    def test_campus_and_persistent_recovery_require_authentication(self):
+        for path in ('/api/campus', '/api/campus/status'):
+            with self.assertRaises(HTTPError) as result:
+                self.request(path, token=False)
+            self.assertEqual(result.exception.code, 403)
+        with patch.object(self.panel.campus, 'login') as login:
+            with self.assertRaises(HTTPError) as result:
+                self.request('/api/campus/login', {'username': 'x'}, origin=False)
+            self.assertEqual(result.exception.code, 403)
+            login.assert_not_called()
+        with patch.object(self.panel.local_recovery, 'change') as change:
+            with self.request('/api/action', {'action': 'pause-sharing', 'tunnel': 'test'}):
+                pass
+            change.assert_called_once_with('test', restore=False)
+
+    def test_unknown_proxy_state_blocks_campus_login(self):
+        with patch.object(self.panel.proxy_settings, 'read', return_value={'supported': False}), patch.object(self.panel.campus, 'login') as login:
+            with self.assertRaises(HTTPError) as result:
+                self.request('/api/campus/login', {'username': 'x'})
+            self.assertEqual(result.exception.code, 400)
+            login.assert_not_called()
+
     def test_nonexistent_tunnel_never_reaches_command(self):
         with patch('server_network_assist.desktop.native_status', return_value={'tunnels': [], 'elevated': True}), patch('server_network_assist.desktop.run') as run:
             with self.assertRaises(ValueError):

@@ -28,6 +28,7 @@ import webbrowser
 from . import __version__
 from .desktop_observability import EventLog, TrafficSampler, guidance, release_check
 from .desktop_proxy import ProxySettings
+from .desktop_recovery import LocalRecovery, CampusLogin
 
 ROOT = Path(__file__).resolve().parent
 TASK_NAME = 'ServerNetworkAssist-Desktop'
@@ -60,11 +61,20 @@ def native_status() -> dict:
     routes = json.loads(run(['ip', '-j', '-4', 'route', 'show', 'default']))
     units = json.loads(run(['systemctl', 'list-units', '--all', '--type=service',
         '--output=json', '--no-pager', 'wg-quick@*.service']))
+    installed = json.loads(run(['systemctl', 'list-unit-files', '--output=json', '--no-pager', 'wg-quick@*.service']))
+    loaded = {item['unit'] for item in units}
+    for item in installed:
+        name = item.get('unit_file', '')
+        if name and name != 'wg-quick@.service' and name not in loaded:
+            active = run(['systemctl', 'show', '--property=ActiveState', '--value', '--', name])
+            units.append({'unit': name, 'active': active})
     tunnels = []
     for unit in units:
         name = unit['unit'][len('wg-quick@'):-len('.service')]
         row = dict(name=name, active=unit.get('active') == 'active', addresses=[],
                    sent=0, received=0, handshake=0, endpoint='', telemetry=False)
+        row['start_mode'] = run(['systemctl', 'show', '--property=UnitFileState', '--value', '--', unit['unit']])
+        row['service_state'] = unit.get('active')
         if row['active']:
             with contextlib.suppress(Exception):
                 for line in run(['wg', 'show', name, 'transfer']).splitlines():
@@ -123,6 +133,8 @@ class Panel:
         self.events = EventLog(data)
         self.traffic = TrafficSampler()
         self.proxy_settings = ProxySettings(data, WINDOWS, run)
+        self.local_recovery = LocalRecovery(data, WINDOWS, run, native_status)
+        self.campus = CampusLogin(data, native_status)
         self.fleet_runtime = None
         self.fleet_lock = threading.Lock()
         self.update_cached = None
@@ -158,6 +170,7 @@ class Panel:
                     hostname=socket.gethostname(), platform='Windows' if WINDOWS else 'Ubuntu / Linux',
                     version=__version__, timestamp=int(time.time()))
             result['traffic'] = self.traffic.sample(result.get('tunnels', []))
+            result['recovery'] = self.local_recovery.records()
             result['system']['scope'] = ('当前进程代理环境 / Windows 手动代理；不执行 PAC' if WINDOWS else
                                          '当前进程 HTTP(S) 代理环境；GNOME、浏览器和系统服务可有独立设置')
             result['background'] = {'running': True, 'tray_available': False, 'tray_running': False,
@@ -218,6 +231,12 @@ def handler_for(panel: Panel):
                     return self.reply(200, panel.fleet('GET', self.path[len('/api/fleet'):]))
                 if self.path == '/api/proxy':
                     return self.reply(200, {'proxy': panel.proxy_settings.read(), 'backups': panel.proxy_settings.backups()})
+                if self.path == '/api/campus':
+                    return self.reply(200, panel.campus.status())
+                if self.path == '/api/campus/status':
+                    with panel.lock:
+                        result = panel.campus.current()
+                    return self.reply(200, result)
                 if self.path == '/api/diagnostics':
                     try:
                         state = panel.status()
@@ -238,7 +257,7 @@ def handler_for(panel: Panel):
         def do_POST(self):
             if not self.authorized() or self.headers.get('Origin') != panel.origin:
                 return self.reply(403, {'error': '请求来源或令牌无效'})
-            if self.path not in ('/api/action', '/api/proxy/save', '/api/proxy/restore') and not self.path.startswith('/api/fleet/'):
+            if self.path not in ('/api/action', '/api/proxy/save', '/api/proxy/restore', '/api/campus/login') and not self.path.startswith('/api/fleet/'):
                 return self.reply(404, {'error': 'Not found'})
             try:
                 size = int(self.headers.get('Content-Length', 0))
@@ -248,7 +267,19 @@ def handler_for(panel: Panel):
                 if not isinstance(value, dict):
                     raise ValueError('请求必须为 JSON 对象')
                 if self.path.startswith('/api/fleet/'):
-                    return self.reply(200, panel.fleet('POST', self.path[len('/api/fleet'):], value))
+                    with panel.lock:
+                        result = panel.fleet('POST', self.path[len('/api/fleet'):], value)
+                        panel.cached = None
+                    return self.reply(200, result)
+                if self.path == '/api/campus/login':
+                    with panel.lock:
+                        proxy = panel.proxy_settings.read()
+                        if not proxy.get('supported') or proxy.get('enabled') or proxy.get('pac'):
+                            raise ValueError('请先检查并关闭当前用户手动代理与自动代理 PAC，再使用物理网络登录')
+                        result = panel.campus.login(value)
+                        panel.cached = None
+                    panel.events.add('campus-login', 'success')
+                    return self.reply(200, result)
                 if self.path in ('/api/proxy/save', '/api/proxy/restore'):
                     with panel.lock:
                         result = panel.proxy_settings.save(value) if self.path.endswith('/save') else panel.proxy_settings.restore(value.get('id', ''))
@@ -259,6 +290,8 @@ def handler_for(panel: Panel):
                 with panel.lock:
                     if action in ('connect', 'disconnect'):
                         change_tunnel(str(value.get('tunnel', '')), action)
+                    elif action in ('pause-sharing', 'restore-startup'):
+                        panel.local_recovery.change(str(value.get('tunnel', '')), restore=action == 'restore-startup')
                     elif action == 'disable-proxy':
                         panel.proxy_settings.save({'enabled': False})
                     else:

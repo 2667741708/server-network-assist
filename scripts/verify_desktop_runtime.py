@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 
 
-def verify(data, expected=None):
+def verify(data, expected=None, campus_account=None):
     state = json.loads((data/'desktop-instance.json').read_text(encoding='utf-8'))
     origin = f"http://127.0.0.1:{int(state['port'])}"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -33,15 +33,27 @@ def verify(data, expected=None):
     assert denied == 403, 'Unauthenticated status was not rejected'
     if expected:
         assert all(code == 200 for code in checks.values()), checks
+    campus = None
+    if campus_account:
+        code, configured = get('/api/campus')
+        assert code == 200 and configured.get('configured'), 'Campus script not configured'
+        code, campus = get('/api/campus/status')
+        assert code == 200 and campus.get('online'), 'Campus account not online'
+        assert campus.get('account') == campus_account, 'Campus account mismatch'
+        assert campus.get('internet_online') is True, 'Campus internet probe did not pass'
+        assert not any(t.get('active') for t in status.get('tunnels', [])), 'A local sharing tunnel remains active'
+        assert denied == get('/api/campus/status', False)[0], 'Campus status requires token'
     return dict(health=health, port=state['port'], checks=checks, unauthenticated_status=denied,
+        campus=campus,
         direct=status.get('direct'), system=status.get('system'),
         proxy_enabled=status.get('proxy', {}).get('enabled'), background=status.get('background'),
-        tunnels=[dict(name=t['name'], active=t['active']) for t in status.get('tunnels', [])])
+        tunnels=[dict(name=t['name'], active=t['active'], start_mode=t.get('start_mode')) for t in status.get('tunnels', [])])
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--expected-version')
+    parser.add_argument('--expected-campus-account')
     args = parser.parse_args()
-    print(json.dumps(verify(args.data, args.expected_version), ensure_ascii=True))
+    print(json.dumps(verify(args.data, args.expected_version, args.expected_campus_account), ensure_ascii=True))
