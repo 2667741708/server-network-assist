@@ -139,9 +139,11 @@ async function main() {
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
     assert.equal(await page.locator('article img').evaluateAll(nodes=>nodes.every(n=>n.complete&&n.naturalWidth>0)),true);
     const imageLink=await page.locator('article img').first().evaluate(image=>image.closest('a')?.href);
-    await page.locator('article img').first().click();
-    if(imageLink){assert.equal(page.url(),imageLink);await page.goBack({waitUntil:'networkidle'});}
-    else {await page.getByRole('dialog').waitFor({state:'visible'});await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});}
+    if(imageLink){
+      await Promise.all([page.waitForURL(imageLink,{waitUntil:'load'}),page.locator('article img').first().click()]);
+      assert.equal(page.url(),imageLink);await page.goBack({waitUntil:'networkidle'});
+    }
+    else {await page.locator('article img').first().click();await page.getByRole('dialog').waitFor({state:'visible'});await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});}
     await page.screenshot({path:path.join(output,`article-${width}.png`),fullPage:true});
   }
   await page.goto('http://127.0.0.1:9421/projects/search/',{waitUntil:'networkidle'});
