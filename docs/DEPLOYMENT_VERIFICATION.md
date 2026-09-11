@@ -58,3 +58,9 @@ python -m unittest discover -s tests -p test_project_deployment.py -v
 原先占用该端口的 `server-panel.service` 已停止并禁用，但程序、`/var/lib/server-panel` 数据和 unit 文件均未删除。回滚备份位于 `/var/backups/server-network-assist/`，包括 `Caddyfile.before-wg-0.4.1`、`server-network-assist.env.before-0.4.1` 和 `server-panel.service.before-wg-0.4.1`。
 
 从独立组网节点 `c201-4090-wg` 访问根地址得到 308，再访问 `/network-assist/` 得到 200；私网 `/api/session` 返回 `secure=false`、`passkeys=false`。使用生产凭据的无回显检查确认登录为 200、收到 CSRF，并读取到 4 台主机。原 HTTPS 入口仍返回 `secure=true`、`passkeys=true`。
+
+## 远程 Codex 工作台 0.4.2
+
+2026-09-11，管理台已升级至 `0.4.2`。Codex 页面通过远端 CLI 的 app-server 协议读取真实会话、完整消息和项目目录，并从 `model/list` 动态取得当前账号可用模型、推理强度与 Fast 支持情况。历史会话可在面板中接续；新会话可选择项目目录、只读或工作区可写权限、模型、推理档位和速度。
+
+本地验证为 Angular 生产构建成功、Python 全套测试 `102 passed, 1 skipped`。cloud 上 wheel SHA256 为 `6e601ec254ed52dd577adced7d531c6349a83c0de7efdbf8352e453516879f27`；安装后包版本返回 `0.4.2`，服务为 `active`，回环路径 `/network-assist/` 返回 HTTP 200。

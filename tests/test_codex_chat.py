@@ -43,9 +43,13 @@ class CodexChatTests(unittest.TestCase):
         self.assertEqual(len(self.state.codex_sessions(self.host['id'])), 1)
 
     def test_command_and_jsonl_result(self):
-        session = {'remote_thread_id':'', 'sandbox':'workspace-write', 'workspace':'/srv/a folder'}
+        session = {'remote_thread_id':'', 'sandbox':'workspace-write', 'workspace':'/srv/a folder',
+                   'model':'gpt-5.6-sol', 'reasoning_effort':'high', 'service_tier':'priority'}
         command = _codex_command('linux', session)
         self.assertIn("'/srv/a folder'", command)
+        self.assertIn("gpt-5.6-sol", command)
+        self.assertIn('model_reasoning_effort="high"', command)
+        self.assertIn('service_tier="priority"', command)
         resumed = _codex_command('windows', {**session, 'workspace':'', 'remote_thread_id':'abc-123'})
         self.assertIn('resume', resumed)
         stdout = '\n'.join([

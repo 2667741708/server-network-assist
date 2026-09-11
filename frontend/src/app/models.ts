@@ -89,7 +89,38 @@ export interface CodexSession {
   last_error: string;
   created_at: number;
   updated_at: number;
+  model: string;
+  reasoning_effort: string;
+  service_tier: string;
   messages?: CodexMessage[];
+}
+
+export interface CodexModel {
+  id: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: Array<{ reasoningEffort: string; description: string }>;
+  serviceTiers: Array<{ id: string; name: string; description: string }>;
+}
+
+export interface CodexRemoteThread {
+  id: string;
+  name?: string;
+  preview?: string;
+  cwd?: string;
+  model?: string;
+  reasoningEffort?: string;
+  source?: string;
+  updatedAt: number;
+  turns?: Array<{ items?: Array<Record<string, unknown>> }>;
+}
+
+export interface CodexProject {
+  path: string;
+  count: number;
+  updated_at: number;
 }
 
 export interface AuditEvent {

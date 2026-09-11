@@ -81,6 +81,13 @@ class State:
                     role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
                     created_at INTEGER NOT NULL);
             ''')
+            columns = {row['name'] for row in db.execute('PRAGMA table_info(codex_sessions)')}
+            for name, definition in (
+                    ('model', "TEXT NOT NULL DEFAULT ''"),
+                    ('reasoning_effort', "TEXT NOT NULL DEFAULT ''"),
+                    ('service_tier', "TEXT NOT NULL DEFAULT ''")):
+                if name not in columns:
+                    db.execute(f'ALTER TABLE codex_sessions ADD COLUMN {name} {definition}')
             db.execute("UPDATE codex_sessions SET status='error', last_error='管理台重启，上一条消息已中止' WHERE status='running'")
             db.execute("UPDATE codex_messages SET status='error', content='管理台重启，上一条消息已中止' WHERE status='running'")
         self.network = NetworkStore(self)
@@ -196,10 +203,26 @@ class State:
         sandbox = str(p.get('sandbox', 'workspace-write'))
         if sandbox not in ('read-only', 'workspace-write'):
             raise ValueError('Codex 沙箱模式无效')
+        model = str(p.get('model', '')).strip()
+        effort = str(p.get('reasoning_effort', '')).strip()
+        service_tier = str(p.get('service_tier', '')).strip()
+        if len(model) > 120 or not re.fullmatch(r'[a-zA-Z0-9._-]*', model):
+            raise ValueError('Codex 模型名称无效')
+        if effort not in ('', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'):
+            raise ValueError('Codex 推理强度无效')
+        if service_tier not in ('', 'priority'):
+            raise ValueError('Codex 速度模式无效')
+        remote_thread_id = str(p.get('remote_thread_id', '')).strip()
+        if remote_thread_id and not re.fullmatch(r'[a-zA-Z0-9._-]{1,160}', remote_thread_id):
+            raise ValueError('Codex 远端会话标识无效')
         now, session_id = int(time.time()), secrets.token_hex(16)
         with self.connect() as db:
-            db.execute('INSERT INTO codex_sessions VALUES (?,?,?,?,?,?,?,?,?,?)',
-                       (session_id, host['id'], title, workspace, sandbox, '', 'idle', '', now, now))
+            db.execute('''INSERT INTO codex_sessions
+                (id,host_id,title,workspace,sandbox,remote_thread_id,status,last_error,
+                 created_at,updated_at,model,reasoning_effort,service_tier)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (session_id, host['id'], title, workspace, sandbox, remote_thread_id,
+                 'idle', '', now, now, model, effort, service_tier))
         self.audit('codex_session_created', host['name'])
         return self.codex_session(session_id)
 
@@ -415,11 +438,83 @@ def _codex_command(platform, session):
         if session['workspace']:
             arguments.extend(['--cd', session['workspace']])
         arguments.append('-')
+    if session.get('model'):
+        arguments[2:2] = ['--model', session['model']]
+    if session.get('reasoning_effort'):
+        arguments[2:2] = ['--config', f'model_reasoning_effort="{session["reasoning_effort"]}"']
+    if session.get('service_tier'):
+        arguments[2:2] = ['--config', f'service_tier="{session["service_tier"]}"']
     if platform == 'windows':
         if any(any(char in value for char in '&|<>^%\r\n') for value in arguments):
             raise ValueError('Windows Codex 参数包含不安全字符')
         return subprocess.list2cmdline(arguments)
     return shlex.join(arguments)
+
+
+async def _codex_app_request(connection, method, params, timeout=45):
+    """Issue one protocol request against the remote CLI's stdio app-server."""
+    process = await connection.create_process('codex app-server --stdio', encoding='utf-8')
+
+    async def exchange(request_id, request_method, request_params):
+        value = {'id': request_id, 'method': request_method, 'params': request_params}
+        process.stdin.write(json.dumps(value, ensure_ascii=False) + '\n')
+        await process.stdin.drain()
+        while True:
+            line = await asyncio.wait_for(process.stdout.readline(), timeout)
+            if not line:
+                detail = (await process.stderr.read()).strip()
+                raise ValueError((detail or '远端 Codex app-server 提前退出')[:2000])
+            event = json.loads(line)
+            if event.get('id') == request_id:
+                if 'error' in event:
+                    error = event['error']
+                    raise ValueError(str(error.get('message', error))[:2000] if isinstance(error, dict)
+                                     else str(error)[:2000])
+                return event.get('result', {})
+
+    try:
+        await exchange(1, 'initialize', {'clientInfo': {
+            'name': 'server-network-assist', 'title': 'Server Network Assist', 'version': '0.4.2'},
+            'capabilities': {'experimentalApi': True}})
+        return await exchange(2, method, params)
+    finally:
+        process.terminate()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(process.wait_closed(), 3)
+
+
+async def codex_remote_catalog(state, host_id):
+    host = state.host(host_id)
+    if not host or not host.get('codex_enabled', True):
+        raise ValueError('该主机未启用 Codex 对话')
+    async with state.operations, ssh_route(state, host_id) as connection:
+        models = await _codex_app_request(connection, 'model/list', {'limit': 100})
+        threads = await _codex_app_request(connection, 'thread/list', {
+            'limit': 100, 'archived': False, 'sourceKinds': [
+                'cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview',
+                'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown'],
+            'sortKey': 'updated_at', 'sortDirection': 'desc'})
+    data = threads.get('data', [])
+    projects = {}
+    for thread in data:
+        cwd = str(thread.get('cwd') or '').strip()
+        if cwd:
+            project = projects.setdefault(cwd, {'path': cwd, 'count': 0, 'updated_at': 0})
+            project['count'] += 1
+            project['updated_at'] = max(project['updated_at'], int(thread.get('updatedAt') or 0))
+    return {'models': models.get('data', []), 'threads': data,
+            'projects': sorted(projects.values(), key=lambda item: item['updated_at'], reverse=True)}
+
+
+async def codex_remote_thread(state, host_id, thread_id):
+    if not re.fullmatch(r'[a-zA-Z0-9._-]{1,160}', thread_id):
+        raise ValueError('Codex 远端会话标识无效')
+    host = state.host(host_id)
+    if not host or not host.get('codex_enabled', True):
+        raise ValueError('该主机未启用 Codex 对话')
+    async with state.operations, ssh_route(state, host_id) as connection:
+        return await _codex_app_request(connection, 'thread/read', {
+            'threadId': thread_id, 'includeTurns': True}, timeout=60)
 
 
 def _codex_result(stdout, stderr, exit_status):
@@ -687,6 +782,12 @@ def create_app(data, key_file):
             if not value:
                 raise web.HTTPNotFound(text='Codex 会话不存在')
             return web.json_response({'session': value})
+        if path == '/api/codex/remote/catalog':
+            return web.json_response(await codex_remote_catalog(state, request.query.get('host_id', '')))
+        if path == '/api/codex/remote/thread':
+            value = await codex_remote_thread(state, request.query.get('host_id', ''),
+                                              request.query.get('thread_id', ''))
+            return web.json_response(value)
         if path == '/api/security':
             with state.legacy.store._connect() as db:
                 rows = db.execute('SELECT token_hash,user_agent,remote_ip,created_at,expires_at FROM sessions WHERE expires_at>=? ORDER BY created_at DESC', (int(time.time()),)).fetchall()
@@ -761,6 +862,9 @@ def create_app(data, key_file):
                                      'persistent': bool(p.get('persistent')), 'route': state.route(h['id'])}
             return web.json_response({'ticket': ticket})
         if path == '/api/codex/session/create':
+            fresh(state, session)
+            return web.json_response({'session': state.create_codex_session(p)})
+        if path == '/api/codex/session/import':
             fresh(state, session)
             return web.json_response({'session': state.create_codex_session(p)})
         if path == '/api/codex/session/delete':
