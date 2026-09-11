@@ -1,0 +1,7 @@
+---
+import catalog from "../../../projects/catalog.json";
+export function getStaticPaths() {
+  return catalog.projects.map(project => ({ params: { name: project.name } }));
+}
+return Astro.redirect(`/projects/project/${encodeURIComponent(Astro.params.name!)}/`, 301);
+---

@@ -122,7 +122,7 @@ class State:
             self.route(v['id'], hosts)
         previous = self.host(h['id'])
         if previous and hasattr(self, 'network'):
-            active = [p for p in self.network.profiles() if p['state'] not in ('disabled', 'error')
+            active = [p for p in self.network.profiles() if (p['state'] not in ('disabled', 'error') or p.get('cleanup_pending'))
                       and (h['id'] == p['gateway_id'] or h['id'] in p['client_ids'])]
             changed = any(previous.get(k) != h.get(k) for k in
                           ('address', 'port', 'username', 'credential_id', 'jump_id', 'host_key'))

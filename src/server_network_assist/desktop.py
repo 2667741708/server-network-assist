@@ -26,6 +26,8 @@ import urllib.request
 import webbrowser
 
 from . import __version__
+from .desktop_observability import EventLog, TrafficSampler, guidance, release_check
+from .desktop_proxy import ProxySettings
 
 ROOT = Path(__file__).resolve().parent
 TASK_NAME = 'ServerNetworkAssist-Desktop'
@@ -94,21 +96,7 @@ def connectivity(direct: bool) -> dict:
 
 
 def disable_proxy(data: Path) -> None:
-    if not WINDOWS:
-        raise ValueError('请在 Ubuntu 的系统代理设置中修改代理')
-    import winreg
-    path = r'Software\Microsoft\Windows\CurrentVersion\Internet Settings'
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
-        old = {}
-        for name in ('ProxyEnable', 'ProxyServer', 'ProxyOverride', 'AutoConfigURL'):
-            with contextlib.suppress(FileNotFoundError):
-                old[name] = winreg.QueryValueEx(key, name)
-        # Keep an undo record before changing a user preference.
-        backup = data / ('proxy-before-' + time.strftime('%Y%m%d-%H%M%S') + '-' + secrets.token_hex(3) + '.json')
-        backup.write_text(json.dumps(dict(key=path, values=old), ensure_ascii=False, indent=2), encoding='utf-8')
-        winreg.SetValueEx(key, 'ProxyEnable', 0, winreg.REG_DWORD, 0)
-    for option in (39, 37):
-        ctypes.windll.wininet.InternetSetOptionW(None, option, None, 0)
+    ProxySettings(data, WINDOWS, run).save({'enabled': False})
 
 
 def change_tunnel(name: str, action: str) -> None:
@@ -132,6 +120,30 @@ class Panel:
         self.lock = threading.Lock()
         self.cached = None
         self.cached_at = 0.0
+        self.events = EventLog(data)
+        self.traffic = TrafficSampler()
+        self.proxy_settings = ProxySettings(data, WINDOWS, run)
+        self.fleet_runtime = None
+        self.fleet_lock = threading.Lock()
+        self.update_cached = None
+        self.update_at = 0.0
+
+    def fleet(self, method, path, value=None):
+        with self.fleet_lock:
+            if self.fleet_runtime is None:
+                from .desktop_fleet import FleetRuntime
+                self.fleet_runtime = FleetRuntime(self.data, self.events.add)
+        return self.fleet_runtime.request(method, path, value)
+
+    def close(self):
+        if self.fleet_runtime is not None:
+            self.fleet_runtime.close()
+
+    def updates(self):
+        if self.update_cached is None or time.monotonic() - self.update_at > 300:
+            self.update_cached = release_check(__version__)
+            self.update_at = time.monotonic()
+        return self.update_cached
 
     def status(self):
         with self.lock:
@@ -145,6 +157,14 @@ class Panel:
                 result.update(direct=direct.result(), system=system.result(),
                     hostname=socket.gethostname(), platform='Windows' if WINDOWS else 'Ubuntu / Linux',
                     version=__version__, timestamp=int(time.time()))
+            result['traffic'] = self.traffic.sample(result.get('tunnels', []))
+            result['system']['scope'] = ('当前进程代理环境 / Windows 手动代理；不执行 PAC' if WINDOWS else
+                                         '当前进程 HTTP(S) 代理环境；GNOME、浏览器和系统服务可有独立设置')
+            result['background'] = {'running': True, 'tray_available': False, 'tray_running': False,
+                                    'notifications_enabled': False}
+            with contextlib.suppress(Exception):
+                from .desktop_tray import background_status
+                result['background'] = background_status(self.data)
             self.cached, self.cached_at = result, time.monotonic()
             return result
 
@@ -162,8 +182,8 @@ def handler_for(panel: Panel):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
-            self.end_headers()
-            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            with contextlib.suppress(BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                self.end_headers()
                 self.wfile.write(body)
 
         def authorized(self):
@@ -175,6 +195,7 @@ def handler_for(panel: Panel):
             assets = {'/': ('index.html', 'text/html; charset=utf-8'),
                       '/desktop.css': ('desktop.css', 'text/css'),
                       '/framework7-bundle.min.css': ('framework7-bundle.min.css', 'text/css'),
+                      '/framework7-bundle.min.js': ('framework7-bundle.min.js', 'text/javascript'),
                       '/framework7-default-theme.css': ('framework7-default-theme.css', 'text/css'),
                       '/THIRD_PARTY.md': ('THIRD_PARTY.md', 'text/plain; charset=utf-8'),
                       '/FRAMEWORK7-LICENSE.txt': ('FRAMEWORK7-LICENSE.txt', 'text/plain; charset=utf-8'),
@@ -192,29 +213,61 @@ def handler_for(panel: Panel):
                     return self.reply(200, panel.status())
                 except Exception as exc:
                     return self.reply(500, {'error': str(exc)[:800]})
+            try:
+                if self.path.startswith('/api/fleet/'):
+                    return self.reply(200, panel.fleet('GET', self.path[len('/api/fleet'):]))
+                if self.path == '/api/proxy':
+                    return self.reply(200, {'proxy': panel.proxy_settings.read(), 'backups': panel.proxy_settings.backups()})
+                if self.path == '/api/diagnostics':
+                    try:
+                        state = panel.status()
+                        advice = guidance(state)
+                        error = None
+                    except Exception as exc:
+                        state, error = None, str(exc)[:800]
+                        advice = [{'code': 'status-unavailable', 'severity': 'error', 'title': '本机状态读取失败',
+                                   'detail': '检查 WireGuard、系统工具与管理员权限。操作记录仍可查看；共享页可独立探测远端主机和恢复方案。'}]
+                    return self.reply(200, {'status': state, 'events': panel.events.read(), 'guidance': advice, 'error': error})
+                if self.path == '/api/updates':
+                    return self.reply(200, panel.updates())
+            except Exception as exc:
+                panel.events.add(self.path, 'error', type(exc).__name__)
+                return self.reply(400, {'error': str(exc)[:800]})
             self.reply(404, {'error': 'Not found'})
 
         def do_POST(self):
             if not self.authorized() or self.headers.get('Origin') != panel.origin:
                 return self.reply(403, {'error': '请求来源或令牌无效'})
-            if self.path != '/api/action':
+            if self.path not in ('/api/action', '/api/proxy/save', '/api/proxy/restore') and not self.path.startswith('/api/fleet/'):
                 return self.reply(404, {'error': 'Not found'})
             try:
                 size = int(self.headers.get('Content-Length', 0))
-                if not 0 < size <= 1024:
+                if not 0 < size <= 32768:
                     raise ValueError('请求大小无效')
                 value = json.loads(self.rfile.read(size))
+                if not isinstance(value, dict):
+                    raise ValueError('请求必须为 JSON 对象')
+                if self.path.startswith('/api/fleet/'):
+                    return self.reply(200, panel.fleet('POST', self.path[len('/api/fleet'):], value))
+                if self.path in ('/api/proxy/save', '/api/proxy/restore'):
+                    with panel.lock:
+                        result = panel.proxy_settings.save(value) if self.path.endswith('/save') else panel.proxy_settings.restore(value.get('id', ''))
+                        panel.cached = None
+                    panel.events.add(self.path, 'success')
+                    return self.reply(200, result)
                 action = value.get('action')
                 with panel.lock:
                     if action in ('connect', 'disconnect'):
                         change_tunnel(str(value.get('tunnel', '')), action)
                     elif action == 'disable-proxy':
-                        disable_proxy(panel.data)
+                        panel.proxy_settings.save({'enabled': False})
                     else:
                         raise ValueError('不支持的操作')
                     panel.cached = None
+                panel.events.add(action, 'success')
                 self.reply(200, {'ok': True})
             except Exception as exc:
+                panel.events.add(self.path, 'error', type(exc).__name__)
                 self.reply(400, {'error': str(exc)[:800]})
     return Handler
 
@@ -261,6 +314,7 @@ def serve(data: Path):
             server.serve_forever()
         finally:
             server.server_close()
+            panel.close()
             state.unlink(missing_ok=True)
 
 
@@ -328,6 +382,9 @@ def main():
             time.sleep(0.25)
         if not state:
             raise RuntimeError('面板后台启动失败，请重新运行桌面安装程序')
+    with contextlib.suppress(Exception):
+        from .desktop_tray import start_tray
+        start_tray(data)
     open_window(data, state)
 
 
@@ -335,6 +392,14 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as exc:
+        # pythonw has no stderr. Keep startup failures diagnosable without making
+        # optional logging part of the success path, and never log the URL token.
+        with contextlib.suppress(Exception):
+            import traceback
+            error_data = Path(sys.argv[sys.argv.index('--data') + 1]) if '--data' in sys.argv else local_data_dir()
+            error_data.mkdir(parents=True, exist_ok=True)
+            error_file = error_data / ('startup-error-' + time.strftime('%Y%m%d-%H%M%S') + '-' + str(os.getpid()) + '.log')
+            error_file.write_text(traceback.format_exc(), encoding='utf-8')
         if WINDOWS and not ('--serve' in sys.argv):
             ctypes.windll.user32.MessageBoxW(None, str(exc), 'Server Network Assist', 0x10)
         else:

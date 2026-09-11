@@ -1,0 +1,51 @@
+const { chromium } = require('playwright');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const base = process.env.BLOG_PUBLIC_URL || 'https://whm12.art/projects/';
+const output = path.resolve(__dirname, '../artifacts/blog-public-check');
+let browser;
+async function main() {
+  await fs.mkdir(output,{recursive:true});
+  browser=await chromium.launch({headless:true});
+  const page=await browser.newPage({viewport:{width:1440,height:1000}});
+  const errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  page.on('console',message=>{if(message.type()==='error' && /Content Security Policy|Refused to/.test(message.text()))errors.push(message.text());});
+  const response=await page.goto(base,{waitUntil:'networkidle'});
+  assert.equal(response.status(),200);
+  assert.match(await page.locator('h1').innerText(),/从项目到实践/);
+  const csp=response.headers()['content-security-policy'];
+  assert.ok(csp.includes("'wasm-unsafe-eval'"));
+  assert.ok(!csp.includes("'unsafe-eval'"));
+  const theme=await page.locator('html').getAttribute('data-theme');
+  await page.locator('#theme-btn').click();
+  await page.reload({waitUntil:'networkidle'});
+  assert.notEqual(await page.locator('html').getAttribute('data-theme'),theme);
+  await page.goto(new URL('catalog/',base).href,{waitUntil:'networkidle'});
+  assert.equal(await page.locator('main a[href^="/projects/project/"]').count(),25);
+  await page.goto(new URL('server-network-assist/',base).href,{waitUntil:'networkidle'});
+  await page.waitForURL('**/projects/project/server-network-assist/');
+  for(const width of [1440,390]) {
+    await page.setViewportSize({width,height:1000});
+    await page.goto(new URL('posts/tutorials/windows-proxy-diagnosis/',base).href,{waitUntil:'networkidle'});
+    assert.match(await page.locator('h1').innerText(),/Windows/);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    assert.equal(await page.locator('article img').evaluateAll(images=>images.length>0&&images.every(image=>image.complete&&image.naturalWidth>0)),true);
+    await page.screenshot({path:path.join(output,`article-${width}.png`),fullPage:true});
+  }
+  await page.goto(new URL('search/',base).href,{waitUntil:'networkidle'});
+  await page.locator('.pagefind-ui__search-input').fill('Windows');
+  await page.locator('.pagefind-ui__result').first().waitFor();
+  const admin=await page.goto(new URL('admin/',base).href,{waitUntil:'networkidle'});
+  assert.equal(admin.status(),200);
+  await page.waitForFunction(()=>!document.querySelector('#cms-status')?.innerText.includes('正在加载'),{timeout:15000});
+  assert.match(await page.locator('#cms-status').innerText(),/尚未接通 GitHub 登录/);
+  assert.ok(admin.headers()['content-security-policy'].includes("'unsafe-eval'"));
+  assert.ok(admin.headers()['content-security-policy'].includes("connect-src 'self' blob:"));
+  assert.equal(errors.length,0,errors.join('\n'));
+  const result={base,publicStatus:200,projects:25,articleImages:true,search:true,themePersists:true,viewports:[1440,390],oauthConfigured:false,cspPassed:true,verifiedAt:new Date().toISOString()};
+  await fs.writeFile(path.join(output,'result.json'),JSON.stringify(result,null,2));
+  console.log(JSON.stringify(result));
+}
+main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{await browser?.close();});

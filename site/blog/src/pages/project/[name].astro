@@ -1,0 +1,23 @@
+---
+import { getCollection } from "astro:content";
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import Card from "@/components/Card.astro";
+import { getSortedPosts } from "@/utils/getSortedPosts";
+import catalog from "../../../../projects/catalog.json";
+export function getStaticPaths() { return catalog.projects.map(project => ({params:{name:project.name},props:{project}})); }
+const { project } = Astro.props;
+const posts = getSortedPosts(await getCollection("posts")).filter(p => p.data.project === project.name);
+---
+<Layout title={`${project.name} · 项目手记`}><Header />
+<main id="main-content" class="app-layout py-8">
+  <a class="text-accent underline" href="/projects/catalog/">全部项目</a>
+  <h1 class="my-6 text-3xl font-bold break-words">{project.name}</h1>
+  <p>{project.description || "项目源码与使用资料。"}</p>
+  {project.fork && <p class="my-4">这是 Fork 项目，请同时查阅上游说明。</p>}
+  <p class="my-4"><a class="text-accent underline" href={project.url}>GitHub 源码与 README</a></p>
+  <h2 class="mt-10 text-2xl font-semibold">相关文章</h2>
+  {posts.length ? <ul>{posts.map(post => <Card variant="h3" {...post} />)}</ul> : <p class="my-4">尚无独立文章，可先查阅仓库中的使用说明。</p>}
+  {project.name === 'gateway-resilience-guardian' && <p class="my-4"><a class="text-accent underline" href="https://whm12.art/network-resilience/">阅读网络自愈实践</a></p>}
+</main><Footer /></Layout>

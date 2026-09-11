@@ -1,31 +1,45 @@
 #!/usr/bin/env python3
 """Deploy reviewed static files to cloud, preserve existing Caddy routes, rollback on failure.
 
-Upload the generated docs/projects tree separately; run this file with sudo on cloud.
+Upload the verified Astro build tree separately; run this file with sudo on cloud.
 No dependency installation, DNS changes, credential export, or application restarts.
 """
 import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
 import subprocess
 import time
 import urllib.request
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 
 BASE = Path('/var/www/whm-projects')
 CADDYFILE = Path('/etc/caddy/Caddyfile')
+SOURCE_BASE = Path('/home/ubuntu')
+BACKUPS = Path('/var/backups/whm-projects')
 BEGIN = '# BEGIN WHM PROJECT HUB'
 END = '# END WHM PROJECT HUB'
 BLOCK = '''
     # BEGIN WHM PROJECT HUB
     redir /projects /projects/ 308
+    handle_path /projects/admin/* {
+        root * /var/www/whm-projects/current/admin
+        header {
+            Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-eval' INLINE_HASHES; style-src 'self' 'unsafe-inline'; connect-src 'self' blob: https://api.github.com https://github.com; img-src 'self' data: blob: https:; font-src 'self' data:; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+            X-Frame-Options "DENY"
+            Cache-Control "no-store"
+        }
+        file_server
+    }
     handle_path /projects/* {
         root * /var/www/whm-projects/current
         header {
-            Content-Security-Policy "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+            Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' INLINE_HASHES; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
             Permissions-Policy "camera=(), microphone=(), geolocation=()"
             X-Frame-Options "DENY"
             Cache-Control "no-cache"
@@ -38,26 +52,51 @@ BLOCK = '''
 def run(args):
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=40)
 
-def check_public(expected_count):
+def check_public(manifest):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     checks = ['https://whm12.art/projects/', 'https://whm12.art/projects/server-network-assist/',
-              'https://whm12.art/projects/hub.css', 'https://whm12.art/projects/manifest.json',
+              'https://whm12.art/projects/catalog/', 'https://whm12.art/projects/admin/',
+              'https://whm12.art/projects/manifest.json',
               'https://whm12.art/network-resilience/']
     for url in checks:
         with opener.open(url, timeout=20) as response:
             data = response.read()
             if response.status != 200:
                 raise RuntimeError('Public check failed: ' + url)
-            if url.endswith('/manifest.json') and json.loads(data)['projects'] != expected_count:
+            if url.endswith('/manifest.json') and json.loads(data) != manifest:
                 raise RuntimeError('Published manifest does not match the release')
+            csp = response.headers.get('Content-Security-Policy', '')
+            if '/projects/' in url and "frame-ancestors 'none'" not in csp:
+                raise RuntimeError('Missing published security headers: '+url)
+            if '/projects/' in url and '/admin/' not in url and "'unsafe-eval'" in csp:
+                raise RuntimeError('Editor JavaScript policy leaked into public blog')
+    # Verify every public byte, including lazy-loaded CMS chunks, images and search indexes.
+    def verify_file(item):
+        relative, expected = item
+        url = 'https://whm12.art/projects/' + urllib.parse.quote(relative)
+        with opener.open(url, timeout=30) as response:
+            if hashlib.sha256(response.read()).hexdigest() != expected:
+                raise RuntimeError('Public artifact checksum mismatch: '+relative)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(verify_file, manifest['files'].items()))
 
-def deploy(source, expected_sha, dry_run):
-    if os.geteuid() != 0 or socket.gethostname() != 'VM-0-12-ubuntu':
-        raise RuntimeError('Run with sudo only on the verified cloud host')
+def validate_source(source):
+    """Reject traversal, symlinks, inventory drift and altered staged assets."""
     source = Path(source).resolve(strict=True)
-    if not str(source).startswith('/home/ubuntu/') or not (source/'index.html').is_file():
-        raise ValueError('Source must be the uploaded static tree under /home/ubuntu')
     manifest = json.loads((source/'manifest.json').read_text())
+    if manifest.get('format') != 2:
+        raise ValueError('Expected verified AstroPaper deployment manifest v2')
+    actual_files = {p.relative_to(source).as_posix() for p in source.rglob('*')
+                    if p.is_file() and p != source/'manifest.json'}
+    if actual_files != set(manifest['files']):
+        raise ValueError('Release file inventory mismatch')
+    for relative, expected in manifest['files'].items():
+        path = (source/relative).resolve()
+        if source not in path.parents or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError('Release checksum mismatch: '+relative)
+    hashes = manifest['script_hashes']
+    if not all(re.fullmatch(r"'sha256-[A-Za-z0-9+/]{43}='", value) for value in hashes):
+        raise ValueError('Invalid inline script CSP hash')
     if manifest['projects'] != len(manifest['paths']) or manifest['projects'] < 1:
         raise ValueError('Invalid build manifest')
     for relative in manifest['paths']:
@@ -65,8 +104,18 @@ def deploy(source, expected_sha, dry_run):
         if source not in target.parents or not target.is_file():
             raise ValueError('Missing project page: ' + relative)
     for path in source.rglob('*'):
-        if path.is_symlink() or (path.is_file() and path.name != 'LICENSE' and path.suffix not in ('.html','.css','.js','.svg','.png','.xml','.json')):
+        if path.is_symlink() or (path.is_file() and path.name != 'LICENSE' and path.suffix not in ('.html','.css','.js','.svg','.png','.xml','.json','.jpg','.jpeg','.webp','.ico','.txt','.md','.wasm','.woff','.woff2','.pagefind','.pf_fragment','.pf_index','.pf_meta','.gz')):
             raise ValueError('Unexpected public artifact: ' + str(path))
+    return manifest
+
+def deploy(source, expected_sha, dry_run):
+    if os.geteuid() != 0 or socket.gethostname() != 'VM-0-12-ubuntu':
+        raise RuntimeError('Run with sudo only on the verified cloud host')
+    source = Path(source).resolve(strict=True)
+    if SOURCE_BASE not in source.parents or not (source/'index.html').is_file():
+        raise ValueError('Source must be the uploaded static tree under /home/ubuntu')
+    manifest = validate_source(source)
+    block = BLOCK.replace('INLINE_HASHES', ' '.join(manifest['script_hashes']))
     original = CADDYFILE.read_bytes()
     if hashlib.sha256(original).hexdigest() != expected_sha:
         raise RuntimeError('Caddy configuration changed since inspection; inspect again before deployment')
@@ -75,11 +124,11 @@ def deploy(source, expected_sha, dry_run):
         raise ValueError('Unexpected domain configuration')
     if BEGIN in text:
         start = text.index(BEGIN); finish = text.index(END,start)+len(END)
-        updated = text[:start] + BLOCK.strip() + text[finish:]
+        updated = text[:start] + block.strip() + text[finish:]
     else:
         if '/projects' in text or '\n\treverse_proxy ' not in text:
             raise ValueError('Projects route already used or expected upstream missing')
-        updated = text.replace('\n\treverse_proxy ', BLOCK+'\n\treverse_proxy ',1)
+        updated = text.replace('\n\treverse_proxy ', block+'\n\treverse_proxy ',1)
     stamp = time.strftime('%Y%m%d-%H%M%S')+'-'+str(os.getpid())
     candidate = Path('/tmp/Caddyfile.projects-'+stamp)
     candidate.write_text(updated)
@@ -88,7 +137,7 @@ def deploy(source, expected_sha, dry_run):
         if dry_run:
             print(json.dumps({'validated':True,'projects':manifest['projects'],'config_sha256':expected_sha}))
             return
-        backup = Path('/var/backups/whm-projects')/stamp
+        backup = BACKUPS/stamp
         backup.mkdir(parents=True,mode=0o700)
         shutil.copy2(CADDYFILE, backup/'Caddyfile')
         releases = BASE/'releases'; releases.mkdir(parents=True,exist_ok=True)
@@ -108,7 +157,7 @@ def deploy(source, expected_sha, dry_run):
             os.replace(candidate_link,current)
             shutil.copyfile(candidate,CADDYFILE)
             run(['systemctl','reload','caddy.service'])
-            check_public(manifest['projects'])
+            check_public(manifest)
         except Exception:
             CADDYFILE.write_bytes(original)
             if previous:
@@ -120,6 +169,7 @@ def deploy(source, expected_sha, dry_run):
             run(['systemctl','reload','caddy.service'])
             raise
         print(json.dumps({'deployed':True,'url':'https://whm12.art/projects/','projects':manifest['projects'],
+                          'public_files_verified':len(manifest['files']),
                           'release':str(release),'backup':str(backup)}))
     finally:
         candidate.unlink(missing_ok=True)

@@ -1,0 +1,19 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import catalog from "../../../../projects/catalog.json";
+import editorial from "../../../../projects/editorial.json";
+const edits = editorial as Record<string, {title?: string; category?: string; summary?: string}>;
+---
+<Layout title="全部项目 · 项目手记"><Header />
+  <main id="main-content" class="app-layout py-8">
+    <h1 class="text-3xl font-bold">全部项目</h1>
+    <p class="my-4">按项目查找源码和相关文章。项目目录包含资料入口，完整文章会单独标注。</p>
+    <ul>{catalog.projects.map(project => <li class="border-border border-b py-5">
+      <h2 class="text-xl font-semibold"><a class="text-accent underline" href={`/projects/project/${encodeURIComponent(project.name)}/`}>{edits[project.name]?.title || project.name}</a></h2>
+      <p class="my-2">{edits[project.name]?.summary || project.description || "项目资料与源码入口。"}</p>
+      <p class="text-muted-foreground text-sm">{edits[project.name]?.category || "项目探索"} · {project.language || "未标注语言"}{project.fork ? " · Fork" : ""}</p>
+    </li>)}</ul>
+  </main><Footer />
+</Layout>

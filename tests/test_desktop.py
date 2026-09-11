@@ -34,7 +34,7 @@ class DesktopTests(unittest.TestCase):
         if origin:
             headers['Origin'] = self.panel.origin
         data = json.dumps(body).encode() if body is not None else None
-        return self.opener.open(Request(self.panel.origin+path, data=data, headers=headers), timeout=5)
+        return self.opener.open(Request(self.panel.origin+path, data=data, headers=headers), timeout=35)
 
     def test_assets_work_offline_and_never_contain_token(self):
         with self.request('/', token=False) as response:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "server-network-assist"
-version = "0.2.0"
+version = "0.3.0"
 description = "Self-hosted SSH inventory, network reachability and reversible WireGuard gateway console"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,6 +30,9 @@ dependencies = [
 Homepage = "https://github.com/2667741708/server-network-assist"
 Documentation = "https://github.com/2667741708/server-network-assist/tree/main/docs"
 Issues = "https://github.com/2667741708/server-network-assist/issues"
+
+[project.optional-dependencies]
+desktop = ["pystray==0.19.5", "Pillow==12.3.0"]
 
 [project.scripts]
 server-network-assist = "server_network_assist.cli:main"

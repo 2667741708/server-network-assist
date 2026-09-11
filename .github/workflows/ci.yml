@@ -8,6 +8,40 @@ permissions:
   contents: read
 
 jobs:
+  blog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            site/blog/package-lock.json
+      - run: npm ci
+        working-directory: site/blog
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run build
+        working-directory: site/blog
+      - run: node frontend/blog-cms-smoke.cjs
+      - run: node frontend/blog-build-verify.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blog-verification
+          path: |
+            artifacts/blog-cms-check/*.json
+            artifacts/blog-cms-check/*.log
+            artifacts/blog-cms-check/*.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blog-production
+          path: site/blog/dist
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

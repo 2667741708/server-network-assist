@@ -1,18 +1,39 @@
-/* Visual design: unmodified Framework7 iOS theme. Only flow, dialog hosting and full-text adapters. */
-html,body{height:auto;overflow:auto}
-.view,.page{position:relative;height:auto;overflow:visible}
-.navbar{position:fixed;top:0}
-.page-content{height:auto;overflow:visible;max-width:1080px;margin-inline:auto;padding-bottom:16px}
-.navbar-inner{max-width:1080px;margin-inline:auto;left:0;right:0}
-.card,.card-content,.item-title,.item-after,.item-footer,.block,.dialog-text{min-width:0;overflow-wrap:anywhere;white-space:normal}
-.list .item-title{white-space:normal;text-overflow:clip}
-.list .item-after{max-width:none;flex-shrink:0}
-.tunnel-details{display:flex;flex-wrap:wrap;gap:16px}
+/* Framework7 default iOS visuals. Only desktop sizing, full-text flow and native dialog hosting. */
+:root{--f7-panel-width:272px}
+.view-main .page-content>.tabs,.view-main .page-content>#notice{max-width:1100px;margin-inline:auto}
+.panel .page-content{padding-top:16px}
+.card,.card-content,.item-title,.item-after,.item-footer,.item-subtitle,.item-text,.block,.dialog-text,.title{min-width:0;overflow-wrap:anywhere;white-space:normal}
+.list .item-title,.list .item-text,.list .item-subtitle{white-space:normal;text-overflow:clip;max-height:none;display:block;overflow:visible}
+.list .item-after{max-width:none;white-space:normal;flex-shrink:1}
+.list .item-inner{min-width:0}
+.card-header{flex-wrap:wrap;gap:8px}
+.card-header h2{margin:0;font-size:inherit}
+.tunnel-details,.action-row{display:flex;flex-wrap:wrap;gap:12px}
+.action-row{margin-block:16px}
+.action-row>*{max-width:100%}
 .route-list>div{display:flex;flex-direction:column;margin-bottom:16px}
-.mono{font-family:ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.mono,pre{font-family:ui-monospace,Consolas,monospace;overflow-wrap:anywhere;white-space:pre-wrap}
 .button{white-space:normal;height:auto;min-height:var(--f7-button-height)}
+.button:disabled{opacity:var(--f7-button-disabled-opacity,.55);cursor:default}
+.field-list{margin:0!important}
+.field-list .item-input-wrap{width:100%}
+.field-list input:not([type=checkbox]),.field-list textarea,.field-list select{max-width:100%;width:100%;box-sizing:border-box}
+.field-list textarea{height:auto;min-height:80px;resize:vertical;overflow:auto}
+.field-list .item-title{width:100%}
+.field-list .item-inner{display:block}
+.field-list .item-input-info{white-space:normal;overflow-wrap:anywhere;max-height:none}
+.check-options label{display:flex;align-items:flex-start;gap:10px;padding-block:8px;overflow-wrap:anywhere}
+.check-options input{flex-shrink:0;margin-top:5px}
+.table-scroll{overflow:auto;max-height:320px}
+table{width:100%;border-collapse:collapse;text-align:left}
+th,td{padding:8px;overflow-wrap:anywhere;min-width:90px}
+details{margin-block:16px}summary{cursor:pointer}
+#notice{white-space:pre-wrap;overflow-wrap:anywhere}
+#traffic-chart{min-height:180px}
 dialog.dialog{border:0;padding:0;inset:0;margin:auto;transform:none;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto}
 dialog.dialog:not([open]){display:none}
 dialog.dialog[open]{display:block;opacity:1}
 dialog .dialog-title{margin:0}
 [hidden]{display:none!important}
+@media(min-width:900px){.view-main .navbar .left{display:none}}
+@media(max-width:599px){.list .item-inner{flex-wrap:wrap;gap:6px}.list .item-after{margin-left:0}.navbar .title{font-size:17px}}

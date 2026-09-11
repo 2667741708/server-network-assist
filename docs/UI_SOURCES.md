@@ -6,6 +6,8 @@
 - [官方页面骨架](https://framework7.io/docs/app-layout)
 - [官方分组列表与媒体列表](https://framework7.io/docs/list-view)
 - [官方卡片](https://framework7.io/docs/cards)
+- [官方响应式侧栏](https://framework7.io/docs/panel)、[菜单列表](https://framework7.io/docs/menu-list)、[Tabs](https://framework7.io/docs/tabs)
+- [官方表单输入](https://framework7.io/docs/inputs)、[官方速率历史图组件](https://framework7.io/docs/area-chart)
 - [MIT 授权](https://github.com/framework7io/framework7/blob/master/LICENSE)
 
 ## 可核查的设计师候选
@@ -21,7 +23,7 @@ Framework7 的作者 Vladimir Kharlampidi 提供了可运行的 iOS 风格组件
 
 ## 集成与复现
 
-Titan 桌面面板使用 `desktop_ui/` 中的现成 iOS 样式；多主机管理台仍使用 Angular Material。项目总览也使用 Framework7 列表与卡片，长文沿用原文章布局。
+Titan 桌面面板使用 `desktop_ui/` 中的现成 iOS 样式和 JavaScript 组件，v0.3 采用官方 900px 可见断点侧栏、菜单选中状态、标签页与图表。多主机管理台仍使用 Angular Material；桌面通过独立受保护 API 接入同一业务操作。
 
 `docs/vendor/framework7/` 保存固定版本、MIT 授权、npm 包完整性和文件摘要。`frontend/framework7-theme.cjs` 使用官方库的默认参数生成默认色板，未自定义视觉参数；将色板保存为外部 CSS，避免运行时插入内联样式。桌面运行时只加载本地文件。
 
