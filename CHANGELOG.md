@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-09-11
+
+- Allow explicitly configured trusted private-network browser origins alongside the primary HTTPS origin.
+- Choose cookie security per validated browser origin so a WireGuard/LAN HTTP entry can use password login while passkeys remain restricted to the primary HTTPS origin.
+
 ## 0.4.0 - 2026-09-11
 
 - Add explicit OpenSSH alias import with encrypted private-key storage, pinned known-host keys and ProxyJump chains.

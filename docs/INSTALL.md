@@ -70,9 +70,12 @@ PANEL_ORIGIN=https://network.example.com
 ```ini
 PANEL_ORIGIN=https://example.com
 PANEL_BASE_PATH=/network-assist
+PANEL_ALLOWED_ORIGINS=http://10.201.250.1:9180
 ```
 
 浏览器入口为 `https://example.com/network-assist/`。路径前缀不要带结尾斜杠，反向代理需要在转发前移除该前缀，并保留 WebSocket 升级头。不要用公网 IP 上的明文 HTTP 传输管理员密码、SSH 私钥或 Codex 对话。
+
+`PANEL_ALLOWED_ORIGINS` 可用英文逗号列出可信的 WireGuard/Tailscale/LAN 入口。HTTP 私网入口使用密码登录，通行密钥仍只对主 `PANEL_ORIGIN` 开放。推荐让 Caddy/Nginx 监听私网地址并转发至 `127.0.0.1:9180`，不要让应用监听所有公网网卡。
 
 ## 升级
 

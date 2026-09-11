@@ -50,3 +50,11 @@ python -m unittest discover -s tests -p test_project_deployment.py -v
 | 回滚文件 | `/var/backups/server-network-assist/Caddyfile.before-a73254e`；删除新增路由并重载 Caddy 即可撤销公网入口 |
 
 公网探测时，`c201-4090-wg` 的 SSH、公网和 Codex CLI 均可用；其他机器按当时链路状态显示不可达或未安装 Codex。一次只读 Codex 端到端测试已从管理台到达远端 CLI，但远端连接模型服务时发生 TLS 握手中断，管理台正确记录为失败；这属于远端 Codex 上游连接状态，不应写成对话成功。
+
+## Cloud 组网直连入口
+
+2026-09-11 15:25（Asia/Shanghai），管理台升级至 `0.4.1`，增加组网入口 <http://10.201.250.1:9180>。Caddy 仅绑定 cloud 的 WireGuard 地址，并把根路径重定向至 `/network-assist/`；应用仍只监听 `127.0.0.1:9180`，没有把管理端口暴露到公网网卡。
+
+原先占用该端口的 `server-panel.service` 已停止并禁用，但程序、`/var/lib/server-panel` 数据和 unit 文件均未删除。回滚备份位于 `/var/backups/server-network-assist/`，包括 `Caddyfile.before-wg-0.4.1`、`server-network-assist.env.before-0.4.1` 和 `server-panel.service.before-wg-0.4.1`。
+
+从独立组网节点 `c201-4090-wg` 访问根地址得到 308，再访问 `/network-assist/` 得到 200；私网 `/api/session` 返回 `secure=false`、`passkeys=false`。使用生产凭据的无回显检查确认登录为 200、收到 CSRF，并读取到 4 台主机。原 HTTPS 入口仍返回 `secure=true`、`passkeys=true`。

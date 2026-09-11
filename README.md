@@ -139,7 +139,7 @@ py -3 -m venv .venv
 
 导入完成后，登录首页会自动检查 SSH、公网和 Codex CLI 状态。远端账号需自行安装并登录 Codex CLI；管理台不会复制 Codex 登录凭据。
 
-浏览器访问 `http://127.0.0.1:9180`。生产环境请使用 Caddy、Nginx 或其他反向代理提供 HTTPS，并设置精确的 `PANEL_ORIGIN`；通行密钥只在固定 HTTPS 来源下启用。
+浏览器访问 `http://127.0.0.1:9180`。生产环境请使用 Caddy、Nginx 或其他反向代理提供 HTTPS，并设置精确的 `PANEL_ORIGIN`；可信组网入口可通过 `PANEL_ALLOWED_ORIGINS` 增加。通行密钥只在主 HTTPS 来源下启用。
 
 ## 使用顺序
 

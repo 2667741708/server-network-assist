@@ -50,6 +50,14 @@ class State:
         self.operations = asyncio.Semaphore(8)
         self.network_changes = asyncio.Lock()
         self.origin = os.environ.get('PANEL_ORIGIN', '').rstrip('/')
+        extra_origins = [value.strip().rstrip('/') for value in
+                         os.environ.get('PANEL_ALLOWED_ORIGINS', '').split(',') if value.strip()]
+        self.allowed_origins = tuple(dict.fromkeys(value for value in [self.origin, *extra_origins] if value))
+        for value in self.allowed_origins:
+            parsed = urlsplit(value)
+            if (parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or
+                    parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+                raise ValueError('PANEL_ORIGIN/PANEL_ALLOWED_ORIGINS 必须是完整且不含路径的 HTTP(S) 来源')
         self.base_path = os.environ.get('PANEL_BASE_PATH', '').strip()
         if self.base_path and (not self.base_path.startswith('/') or self.base_path.endswith('/') or
                                not re.fullmatch(r'/[a-zA-Z0-9/_-]+', self.base_path)):
@@ -278,6 +286,31 @@ class State:
 
     def passkey_ready(self):
         return bool(self.origin and (self.secure or urlsplit(self.origin).hostname in ('localhost', '127.0.0.1')))
+
+    def request_origin(self, request):
+        origin = request.headers.get('Origin', '').rstrip('/')
+        if origin:
+            return origin
+        forwarded_scheme = request.headers.get('X-Forwarded-Proto', '').split(',', 1)[0].strip()
+        forwarded_host = request.headers.get('X-Forwarded-Host', '').split(',', 1)[0].strip()
+        if forwarded_scheme in ('http', 'https') and forwarded_host:
+            forwarded = f'{forwarded_scheme}://{forwarded_host}'.rstrip('/')
+            if forwarded in self.allowed_origins:
+                return forwarded
+        return f'{request.scheme}://{request.host}'
+
+    def origin_allowed(self, request):
+        origin = request.headers.get('Origin', '').rstrip('/')
+        if not origin:
+            return True
+        expected = f'{request.scheme}://{request.host}'
+        return origin in self.allowed_origins if self.allowed_origins else origin == expected
+
+    def cookie_secure(self, request):
+        return self.request_origin(request).startswith('https://')
+
+    def passkey_allowed(self, request):
+        return self.passkey_ready() and self.request_origin(request) == self.origin
 
 
 STATE_KEY = web.AppKey("state", State)
@@ -589,7 +622,8 @@ def new_session(state, request, p):
     state.recent = {k: v for k, v in state.recent.items() if v >= time.time()-300}
     state.recent[token_digest(token)] = time.time()
     response = web.json_response({'csrf': csrf})
-    response.set_cookie('panel_session', token, max_age=age, httponly=True, secure=state.secure, samesite='Strict', path='/')
+    response.set_cookie('panel_session', token, max_age=age, httponly=True,
+                        secure=state.cookie_secure(request), samesite='Strict', path='/')
     state.audit('login', name)
     return response
 
@@ -605,8 +639,7 @@ def create_app(data, key_file):
         try:
             if request.method == 'POST' or request.path == '/ws':
                 origin = request.headers.get('Origin')
-                expected = state.origin or f'{request.scheme}://{request.host}'
-                if (origin and origin != expected) or (request.path == '/ws' and not origin):
+                if not state.origin_allowed(request) or (request.path == '/ws' and not origin):
                     raise web.HTTPForbidden(text='来源无效')
             if request.path.startswith('/api/') and request.path not in PUBLIC:
                 session = current(state, request)
@@ -640,7 +673,7 @@ def create_app(data, key_file):
         if path == '/api/session':
             s = current(state, request)
             return web.json_response({'authenticated': bool(s), 'csrf': s['csrf_token'] if s else None,
-                'passkeys': state.passkey_ready(), 'secure': state.secure, 'version': '2.0'})
+                'passkeys': state.passkey_allowed(request), 'secure': state.cookie_secure(request), 'version': '2.0'})
         if path == '/api/hosts':
             return web.json_response({'hosts': state.hosts()})
         if path == '/api/credentials':
@@ -849,7 +882,7 @@ def create_app(data, key_file):
         return web.json_response({'ok': True})
 
     async def passkey(request, p):
-        if not state.passkey_ready():
+        if not state.passkey_allowed(request):
             raise ValueError('通行密钥需要配置固定 HTTPS 入口')
         register = request.path in ('/api/passkey/register-options', '/api/passkey/register')
         session = request.get(SESSION_KEY)
@@ -876,7 +909,8 @@ def create_app(data, key_file):
             state.challenges[id] = {'challenge': opts.challenge, 'register': register, 'expires': time.time()+120,
                 'session': session['token_hash'] if register else None}
             response = web.json_response(json.loads(options_to_json(opts)))
-            response.set_cookie('pk_challenge', id, httponly=True, secure=state.secure, samesite='Strict', max_age=120, path='/')
+            response.set_cookie('pk_challenge', id, httponly=True, secure=state.cookie_secure(request),
+                                samesite='Strict', max_age=120, path='/')
             return response
         challenge = state.challenges.pop(request.cookies.get('pk_challenge', ''), None)
         if not challenge or challenge['expires'] < time.time() or challenge['register'] != register:

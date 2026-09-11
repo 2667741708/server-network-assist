@@ -108,6 +108,24 @@ class ConsoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('fixture-password', self.state.db.read_bytes().decode(errors='ignore'))
         self.assertNotIn('secret', body)
 
+    async def test_additional_http_origin_uses_non_secure_cookie(self):
+        self.state.origin = 'https://network.example.com'
+        self.state.secure = True
+        self.state.allowed_origins = ('https://network.example.com', 'http://10.201.250.1:9180')
+        response = await self.client.post('/api/login', json=self.secret,
+            headers={'Origin':'http://10.201.250.1:9180'})
+        self.assertEqual(response.status, 200)
+        self.assertFalse(response.cookies['panel_session']['secure'])
+        session = await self.client.get('/api/session', headers={'Origin':'http://10.201.250.1:9180'})
+        body = await session.json()
+        self.assertFalse(body['secure'])
+        self.assertFalse(body['passkeys'])
+        public = await self.client.get('/api/session', headers={
+            'X-Forwarded-Proto':'https', 'X-Forwarded-Host':'network.example.com'})
+        public_body = await public.json()
+        self.assertTrue(public_body['secure'])
+        self.assertTrue(public_body['passkeys'])
+
     async def test_real_ssh_direct_and_jump(self):
         r = await self.post('host/test', {'id': self.host['id']})
         self.assertEqual(r.status, 200, await r.text())
