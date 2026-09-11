@@ -1000,8 +1000,8 @@ def create_app(data, key_file):
         if not target.is_file():
             raise web.HTTPServiceUnavailable(text='前端尚未构建，请先执行 npm run build')
         if target.name == 'index.html' and state.base_path:
-            body = target.read_text(encoding='utf-8').replace(
-                '<base href="/">', f'<base href="{state.base_path}/">', 1)
+            body = re.sub(r'<base href="/"\s*/?>', f'<base href="{state.base_path}/">',
+                          target.read_text(encoding='utf-8'), count=1)
             return web.Response(text=body, content_type='text/html')
         return web.FileResponse(target)
 
