@@ -55,6 +55,10 @@ import { Host, NetworkProfile, ProbeResult } from './models';
                     : '尚未探测或 SSH 不可达'
               }}
             </p>
+            <div class="button-row">
+              <button mat-flat-button (click)="navigateCodex(host.id)">打开 Codex</button>
+              <button mat-button (click)="navigate('terminal')">SSH 终端</button>
+            </div>
           </mat-card>
         } @empty {
           <div class="empty-state">尚未添加 SSH 主机。</div>
@@ -68,6 +72,7 @@ export class OverviewComponent {
   @Input({ required: true }) profiles: NetworkProfile[] = [];
   @Input({ required: true }) probes: ProbeResult[] = [];
   @Input({ required: true }) navigate!: (page: string) => void;
+  @Input({ required: true }) navigateCodex!: (hostId: string) => void;
   probe(id: string) {
     return this.probes.find((value) => value.id === id);
   }

@@ -24,6 +24,8 @@ const artifacts = path.resolve(__dirname, '../artifacts');
         const host = { id: 'windows-fixture', name: 'Windows 长名称网络设备测试 '.repeat(8), address: '192.0.2.20', port: 22, username: 'tester', credential_id: '', jump_id: '', host_key: '', group: '', favorite: false, terminal_enabled: true };
         await page.route('**/api/hosts', (route) => route.fulfill({ json: { hosts: [host] } }));
         await page.route('**/api/network/probe', (route) => route.fulfill({ json: { results: [{ ...host, os: 'Windows', ssh: true, dns: true, internet: true, helper: true, system_internet: false, diagnosis: 'system_proxy_failed', default_route: 'VeryLongNetworkAdapterName'.repeat(12) + ': 192.0.2.1' }] } }));
+      } else {
+        await page.route('**/api/network/probe', (route) => route.fulfill({ json: { results: [] } }));
       }
       await page.goto(base, { waitUntil: 'networkidle' });
       await page.getByLabel('密码').fill(credentials.password);
@@ -42,6 +44,12 @@ const artifacts = path.resolve(__dirname, '../artifacts');
       }
       await navigation.locator('button').filter({ hasText: '终端' }).click();
       await page.locator('.terminal-view .xterm').waitFor();
+      await navigation.locator('button').filter({ hasText: 'Codex 对话' }).click();
+      await page.getByRole('heading', { name: '服务器 Codex 对话', exact: true }).waitFor();
+      const chatOverflow = await page.locator('.codex-shell').evaluate((element) =>
+        element.scrollWidth > element.clientWidth + 1);
+      if (chatOverflow) throw new Error(`${name}: Codex layout has hidden horizontal overflow`);
+      await page.screenshot({ path: path.join(artifacts, `codex-${name}.png`), fullPage: true });
       await navigation.locator('button').filter({ hasText: '安全' }).click();
       await page.getByRole('heading', { name: '安全设置', exact: true }).waitFor();
       const layout = await page.locator('.sidebar').evaluate((element) => {

@@ -65,6 +65,15 @@ PANEL_ORIGIN=https://network.example.com
 
 不要把管理台直接监听在公网地址。推荐先通过 WireGuard/Tailscale/内网访问，再叠加 HTTPS。
 
+若与现有站点共用域名，可以让服务继续监听 `127.0.0.1:9180`，由反向代理把 `/network-assist/` 转发给它，并在环境文件中增加：
+
+```ini
+PANEL_ORIGIN=https://example.com
+PANEL_BASE_PATH=/network-assist
+```
+
+浏览器入口为 `https://example.com/network-assist/`。路径前缀不要带结尾斜杠，反向代理需要在转发前移除该前缀，并保留 WebSocket 升级头。不要用公网 IP 上的明文 HTTP 传输管理员密码、SSH 私钥或 Codex 对话。
+
 ## 升级
 
 1. 备份整个数据目录，尤其是 `master.key` 和两个 SQLite 文件。

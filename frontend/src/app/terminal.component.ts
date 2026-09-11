@@ -99,7 +99,7 @@ export class TerminalComponent implements AfterViewInit, OnDestroy {
   }
   open(ticket: string) {
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.socket = new WebSocket(`${scheme}://${location.host}/ws`);
+    this.socket = new WebSocket(`${scheme}://${location.host}${this.api.url('/ws')}`);
     this.socket.binaryType = 'arraybuffer';
     this.socket.onopen = () => this.socket?.send(JSON.stringify({ ticket }));
     this.socket.onmessage = (event) => {

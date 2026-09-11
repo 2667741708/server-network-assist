@@ -16,6 +16,8 @@
 - 凭据 API 不返回密文或明文；审计过滤敏感字段
 - 终端票据 30 秒过期、绑定会话且只能使用一次
 - 高风险操作需要 5 分钟内重新验证密码
+- Codex 消息只发送到所选 SSH 主机上的现有 Codex CLI；不把远端 Codex 登录凭据传回管理台
+- Codex 对话仅允许 `read-only` 或 `workspace-write` 沙箱，不提供绕过审批与沙箱的开关
 - 非 loopback 监听必须配置精确公开 Origin
 - systemd 服务模板启用 `NoNewPrivileges`、`ProtectSystem` 和专用可写目录
 
@@ -24,6 +26,7 @@
 - 通过 VPN 或可信内网限制管理入口，并使用 HTTPS
 - 对 `master.key` 和 SQLite 文件做加密备份
 - 为面板创建专用 SSH 账号和专用私钥
+- Codex 会话正文保存在管理台 SQLite 中；可能包含代码或内部信息，备份与截图需按敏感资料处理
 - 人工核对 SSH 指纹与 sudoers 内容
 - 使用主机防火墙限制 WireGuard UDP 端口来源
 - 在可现场恢复的主机上先验证启用和断开

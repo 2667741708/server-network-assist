@@ -13,6 +13,7 @@
 - 120 秒切换确认窗口，复检失败自动回退
 - systemd 定时维护；连续故障后停用隧道并恢复原路由
 - Xterm.js 网页终端，支持可选 tmux 持久会话
+- 远端 Codex CLI 对话：点击服务器创建类似 ChatGPT 的独立会话，并显示 CLI 可用状态
 - 本地加密凭据库、CSRF/Origin 防护、会话撤销、审计日志与 WebAuthn 通行密钥
 - Angular Material 响应式界面，桌面、平板和手机均可使用
 - 本机桌面面板：独立多机网络共享配置、源代理选择、代理备份恢复、实时速率与历史、诊断日志、原生托盘和更新入口
@@ -129,6 +130,14 @@ py -3 -m venv .venv
 上面的命令启动服务器管理台。若要独立桌面窗口和 Windows 快捷方式，继续按 [桌面面板安装指南](docs/DESKTOP.md#windows-离线安装) 操作。
 
 首次账号保存在 `data/initial-login.json`，权限应保持为仅当前用户可读。登录并安全保存恢复密钥后，建议删除这个一次性交付文件。
+
+管理台不会自动信任 SSH 配置中的全部主机。可以明确列出要导入的别名；导入器只接受 `known_hosts` 中已有的主机密钥，并把私钥加密保存到当前数据目录：
+
+```powershell
+.\.venv\Scripts\server-network-assist.exe import-ssh --data .\data --alias cloud --alias c201-4090-wg
+```
+
+导入完成后，登录首页会自动检查 SSH、公网和 Codex CLI 状态。远端账号需自行安装并登录 Codex CLI；管理台不会复制 Codex 登录凭据。
 
 浏览器访问 `http://127.0.0.1:9180`。生产环境请使用 Caddy、Nginx 或其他反向代理提供 HTTPS，并设置精确的 `PANEL_ORIGIN`；通行密钥只在固定 HTTPS 来源下启用。
 

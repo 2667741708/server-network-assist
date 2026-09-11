@@ -85,6 +85,12 @@ class ConsoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.assertIn('app-root', await response.text())
 
+    async def test_path_prefixed_frontend_rewrites_base_href(self):
+        self.state.base_path = '/network-assist'
+        response = await self.client.get('/')
+        self.assertEqual(response.status, 200)
+        self.assertIn('<base href="/network-assist/">', await response.text())
+
     async def test_persistent_login_device_revoke(self):
         r = await self.login(30)
         self.assertEqual(r.cookies['panel_session']['max-age'], '2592000')

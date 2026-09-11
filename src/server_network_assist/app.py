@@ -15,6 +15,7 @@ import re
 import secrets
 import shlex
 import sqlite3
+import subprocess
 import time
 from urllib.parse import urlsplit
 
@@ -44,10 +45,15 @@ class State:
         self.challenges = {}
         self.tickets = {}
         self.sockets = {}
+        self.codex_jobs = {}
         self.failed = {}
         self.operations = asyncio.Semaphore(8)
         self.network_changes = asyncio.Lock()
         self.origin = os.environ.get('PANEL_ORIGIN', '').rstrip('/')
+        self.base_path = os.environ.get('PANEL_BASE_PATH', '').strip()
+        if self.base_path and (not self.base_path.startswith('/') or self.base_path.endswith('/') or
+                               not re.fullmatch(r'/[a-zA-Z0-9/_-]+', self.base_path)):
+            raise ValueError('PANEL_BASE_PATH 必须是类似 /network-assist 的安全路径')
         self.secure = self.origin.startswith('https://')
         with self.connect() as db:
             db.executescript('''
@@ -56,7 +62,19 @@ class State:
                     kind TEXT NOT NULL, secret BLOB NOT NULL);
                 CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, name TEXT NOT NULL,
                     public_key TEXT NOT NULL, sign_count INTEGER NOT NULL, created_at INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS codex_sessions (
+                    id TEXT PRIMARY KEY, host_id TEXT NOT NULL, title TEXT NOT NULL,
+                    workspace TEXT NOT NULL, sandbox TEXT NOT NULL,
+                    remote_thread_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+                    last_error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS codex_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+                    role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL);
             ''')
+            db.execute("UPDATE codex_sessions SET status='error', last_error='管理台重启，上一条消息已中止' WHERE status='running'")
+            db.execute("UPDATE codex_messages SET status='error', content='管理台重启，上一条消息已中止' WHERE status='running'")
         self.network = NetworkStore(self)
 
     @contextlib.contextmanager
@@ -113,6 +131,10 @@ class State:
             raise ValueError('端口必须为 1–65535')
         h['favorite'] = bool(p.get('favorite'))
         h['terminal_enabled'] = bool(p.get('terminal_enabled', True))
+        h['codex_enabled'] = bool(p.get('codex_enabled', True))
+        h['codex_workspace'] = str(p.get('codex_workspace', '')).strip()
+        if len(h['codex_workspace']) > 1024 or any(value in h['codex_workspace'] for value in ('\x00', '\r', '\n')):
+            raise ValueError('Codex 工作目录无效')
         if h['host_key']:
             h['host_key'] = asyncssh.import_public_key(h['host_key']).export_public_key().decode().strip()
         if not any(c['id'] == h['credential_id'] for c in self.credentials()):
@@ -132,6 +154,89 @@ class State:
             db.execute('INSERT OR REPLACE INTO hosts VALUES (?,?)', (h['id'], json.dumps(h)))
         self.audit('host_saved', h['name'])
         return h
+
+    def codex_sessions(self, host_id=''):
+        query = 'SELECT * FROM codex_sessions'
+        parameters = ()
+        if host_id:
+            query += ' WHERE host_id=?'
+            parameters = (host_id,)
+        query += ' ORDER BY updated_at DESC'
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(query, parameters)]
+
+    def codex_session(self, session_id, with_messages=True):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM codex_sessions WHERE id=?', (session_id,)).fetchone()
+            if not row:
+                return None
+            value = dict(row)
+            if with_messages:
+                value['messages'] = [dict(item) for item in db.execute(
+                    'SELECT id,role,content,status,created_at FROM codex_messages WHERE session_id=? ORDER BY id',
+                    (session_id,))]
+            return value
+
+    def create_codex_session(self, p):
+        host = self.host(str(p.get('host_id', '')))
+        if not host or not host.get('codex_enabled', True):
+            raise ValueError('该主机未启用 Codex 对话')
+        title = str(p.get('title', '')).strip()[:120] or f"{host['name']} 对话"
+        workspace = str(p.get('workspace', host.get('codex_workspace', ''))).strip()
+        if len(workspace) > 1024 or any(value in workspace for value in ('\x00', '\r', '\n')):
+            raise ValueError('Codex 工作目录无效')
+        sandbox = str(p.get('sandbox', 'workspace-write'))
+        if sandbox not in ('read-only', 'workspace-write'):
+            raise ValueError('Codex 沙箱模式无效')
+        now, session_id = int(time.time()), secrets.token_hex(16)
+        with self.connect() as db:
+            db.execute('INSERT INTO codex_sessions VALUES (?,?,?,?,?,?,?,?,?,?)',
+                       (session_id, host['id'], title, workspace, sandbox, '', 'idle', '', now, now))
+        self.audit('codex_session_created', host['name'])
+        return self.codex_session(session_id)
+
+    def delete_codex_session(self, session_id):
+        session = self.codex_session(session_id, False)
+        if not session:
+            raise ValueError('Codex 会话不存在')
+        if session['status'] == 'running' or session_id in self.codex_jobs:
+            raise ValueError('请先停止正在运行的回复')
+        with self.connect() as db:
+            db.execute('DELETE FROM codex_messages WHERE session_id=?', (session_id,))
+            db.execute('DELETE FROM codex_sessions WHERE id=?', (session_id,))
+        self.audit('codex_session_deleted', session['host_id'])
+
+    def begin_codex_turn(self, session_id, prompt):
+        session = self.codex_session(session_id, False)
+        if not session:
+            raise ValueError('Codex 会话不存在')
+        if session['status'] == 'running' or session_id in self.codex_jobs:
+            raise ValueError('当前会话正在生成回复')
+        content = str(prompt).strip()
+        if not content or len(content) > 32000:
+            raise ValueError('消息长度需为 1–32000 个字符')
+        now = int(time.time())
+        with self.connect() as db:
+            db.execute('INSERT INTO codex_messages(session_id,role,content,status,created_at) VALUES (?,?,?,?,?)',
+                       (session_id, 'user', content, 'done', now))
+            cursor = db.execute('INSERT INTO codex_messages(session_id,role,content,status,created_at) VALUES (?,?,?,?,?)',
+                                (session_id, 'assistant', '', 'running', now))
+            db.execute("UPDATE codex_sessions SET status='running',last_error='',updated_at=? WHERE id=?",
+                       (now, session_id))
+            message_id = cursor.lastrowid
+        return session, message_id, content
+
+    def finish_codex_turn(self, session_id, message_id, content, remote_thread_id='', error=''):
+        now = int(time.time())
+        status = 'error' if error else 'done'
+        with self.connect() as db:
+            db.execute('UPDATE codex_messages SET content=?,status=? WHERE id=? AND session_id=?',
+                       ((content or error)[:200000], status, message_id, session_id))
+            if remote_thread_id:
+                db.execute('UPDATE codex_sessions SET remote_thread_id=? WHERE id=?',
+                           (remote_thread_id, session_id))
+            db.execute('UPDATE codex_sessions SET status=?,last_error=?,updated_at=? WHERE id=?',
+                       (status, error[:2000], now, session_id))
 
     def credentials(self):
         with self.connect() as db:
@@ -247,16 +352,86 @@ async def network_probe_host(state, host_id):
                             await sftp.remove(temporary)
             else:
                 result = await connection.run(probe_command(), timeout=20, check=False)
+            try:
+                codex = await connection.run('codex --version', timeout=12, check=False)
+                codex_version = (codex.stdout or '').strip().splitlines()
+                codex_ready = codex.exit_status == 0
+            except (OSError, asyncio.TimeoutError, asyncssh.Error):
+                codex_version, codex_ready = [], False
         value = parse_probe(result.stdout, result.exit_status)
         error = (result.stderr or '远端探测失败')[:1000] if result.exit_status else ''
-        value.update(id=host_id, name=host['name'], address=host['address'], error=error)
+        value.update(id=host_id, name=host['name'], address=host['address'], error=error,
+                     codex=codex_ready,
+                     codex_version=codex_version[-1][:120] if codex_version else '')
         return value
     except Exception as exc:
         message = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         return {'id': host_id, 'name': host['name'], 'address': host['address'],
                 'ssh': False, 'dns': False, 'internet': False, 'helper': False,
                 'hostname': '', 'os': '', 'default_route': '', 'http_code': '000',
-                'assist': [], 'error': message[:1000]}
+                'assist': [], 'codex': False, 'codex_version': '', 'error': message[:1000]}
+
+
+def _codex_command(platform, session):
+    if session['remote_thread_id']:
+        arguments = ['codex', 'exec', 'resume', '--json', '--skip-git-repo-check',
+                     session['remote_thread_id'], '-']
+    else:
+        arguments = ['codex', 'exec', '--json', '--color', 'never', '--skip-git-repo-check',
+                     '--sandbox', session['sandbox']]
+        if session['workspace']:
+            arguments.extend(['--cd', session['workspace']])
+        arguments.append('-')
+    if platform == 'windows':
+        if any(any(char in value for char in '&|<>^%\r\n') for value in arguments):
+            raise ValueError('Windows Codex 参数包含不安全字符')
+        return subprocess.list2cmdline(arguments)
+    return shlex.join(arguments)
+
+
+def _codex_result(stdout, stderr, exit_status):
+    answer, thread_id, errors = '', '', []
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get('type') == 'thread.started':
+            thread_id = str(event.get('thread_id', ''))
+        item = event.get('item') if isinstance(event.get('item'), dict) else {}
+        if event.get('type') == 'item.completed' and item.get('type') == 'agent_message':
+            answer = str(item.get('text', ''))
+        if event.get('type') in ('error', 'turn.failed'):
+            errors.append(str(event.get('message') or event.get('error') or 'Codex 执行失败'))
+    if exit_status or not answer:
+        detail = '\n'.join(errors) or stderr.strip() or 'Codex 没有返回可显示的回复'
+        raise ValueError(detail[:2000])
+    return answer[:200000], thread_id
+
+
+async def run_codex_turn(state, session_id, message_id, prompt):
+    try:
+        session = state.codex_session(session_id, False)
+        if not session:
+            return
+        host = state.host(session['host_id'])
+        if not host or not host.get('codex_enabled', True):
+            raise ValueError('主机已移除或 Codex 对话已禁用')
+        async with state.operations, ssh_route(state, host['id']) as connection:
+            platform = await detect_platform(connection)
+            command = _codex_command(platform, session)
+            result = await connection.run(command, input=prompt + '\n', timeout=900, check=False)
+        answer, thread_id = _codex_result(result.stdout, result.stderr, result.exit_status)
+        state.finish_codex_turn(session_id, message_id, answer, thread_id)
+        state.audit('codex_turn_completed', host['name'])
+    except asyncio.CancelledError:
+        state.finish_codex_turn(session_id, message_id, '', error='回复已由管理员停止')
+        raise
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, ValueError) else f'Codex 连接失败（{type(exc).__name__}）'
+        state.finish_codex_turn(session_id, message_id, '', error=message)
+    finally:
+        state.codex_jobs.pop(session_id, None)
 
 
 async def network_install_helper(state, host_id):
@@ -472,6 +647,13 @@ def create_app(data, key_file):
             return web.json_response({'credentials': state.credentials()})
         if path == '/api/network':
             return web.json_response({'profiles': state.network.profiles()})
+        if path == '/api/codex/sessions':
+            return web.json_response({'sessions': state.codex_sessions(request.query.get('host_id', ''))})
+        if path == '/api/codex/session':
+            value = state.codex_session(request.query.get('id', ''))
+            if not value:
+                raise web.HTTPNotFound(text='Codex 会话不存在')
+            return web.json_response({'session': value})
         if path == '/api/security':
             with state.legacy.store._connect() as db:
                 rows = db.execute('SELECT token_hash,user_agent,remote_ip,created_at,expires_at FROM sessions WHERE expires_at>=? ORDER BY created_at DESC', (int(time.time()),)).fetchall()
@@ -545,6 +727,28 @@ def create_app(data, key_file):
             state.tickets[ticket] = {'session': session['token_hash'], 'id': h['id'], 'expires': now+30,
                                      'persistent': bool(p.get('persistent')), 'route': state.route(h['id'])}
             return web.json_response({'ticket': ticket})
+        if path == '/api/codex/session/create':
+            fresh(state, session)
+            return web.json_response({'session': state.create_codex_session(p)})
+        if path == '/api/codex/session/delete':
+            fresh(state, session)
+            state.delete_codex_session(str(p.get('id', '')))
+            return web.json_response({'ok': True})
+        if path == '/api/codex/message':
+            fresh(state, session)
+            session_value, message_id, prompt = state.begin_codex_turn(str(p.get('id', '')), p.get('prompt', ''))
+            job = asyncio.create_task(run_codex_turn(state, session_value['id'], message_id, prompt))
+            state.codex_jobs[session_value['id']] = job
+            state.audit('codex_turn_started', session_value['host_id'])
+            return web.json_response({'session': state.codex_session(session_value['id'])})
+        if path == '/api/codex/cancel':
+            fresh(state, session)
+            session_id = str(p.get('id', ''))
+            job = state.codex_jobs.get(session_id)
+            if not job:
+                raise ValueError('该会话当前没有运行中的回复')
+            job.cancel()
+            return web.json_response({'ok': True})
         if path == '/api/network/probe':
             ids = p.get('ids') or [h['id'] for h in state.hosts()]
             if not isinstance(ids, list) or len(ids) > 64:
@@ -587,6 +791,8 @@ def create_app(data, key_file):
             if any(profile.get('gateway_id') == target_id or target_id in profile.get('client_ids', [])
                    for profile in state.network.profiles()):
                 raise ValueError('该主机仍被网络借助方案使用，请先删除对应方案')
+            if state.codex_sessions(str(target_id)):
+                raise ValueError('该主机仍有 Codex 会话，请先删除对应会话')
             with state.connect() as db:
                 db.execute('DELETE FROM hosts WHERE id=?', (p.get('id'),))
             state.audit('host_deleted', str(p.get('id')))
@@ -793,9 +999,16 @@ def create_app(data, key_file):
             target = root / 'index.html'
         if not target.is_file():
             raise web.HTTPServiceUnavailable(text='前端尚未构建，请先执行 npm run build')
+        if target.name == 'index.html' and state.base_path:
+            body = target.read_text(encoding='utf-8').replace(
+                '<base href="/">', f'<base href="{state.base_path}/">', 1)
+            return web.Response(text=body, content_type='text/html')
         return web.FileResponse(target)
 
     async def shutdown(app):
+        for job in list(state.codex_jobs.values()):
+            job.cancel()
+        await asyncio.gather(*list(state.codex_jobs.values()), return_exceptions=True)
         await asyncio.gather(*(ws.close(code=1001) for ws in list(state.sockets.values())), return_exceptions=True)
     app.on_shutdown.append(shutdown)
     app.router.add_get('/ws', websocket)

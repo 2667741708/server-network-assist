@@ -24,6 +24,8 @@ export interface Host {
   group: string;
   favorite: boolean;
   terminal_enabled: boolean;
+  codex_enabled: boolean;
+  codex_workspace: string;
 }
 
 export interface NetworkProfile {
@@ -63,7 +65,31 @@ export interface ProbeResult {
   diagnosis?: string;
   client_supported?: boolean;
   gateway_supported?: boolean;
+  codex?: boolean;
+  codex_version?: string;
   error: string;
+}
+
+export interface CodexMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  status: 'running' | 'done' | 'error';
+  created_at: number;
+}
+
+export interface CodexSession {
+  id: string;
+  host_id: string;
+  title: string;
+  workspace: string;
+  sandbox: 'read-only' | 'workspace-write';
+  remote_thread_id: string;
+  status: 'idle' | 'running' | 'done' | 'error';
+  last_error: string;
+  created_at: number;
+  updated_at: number;
+  messages?: CodexMessage[];
 }
 
 export interface AuditEvent {

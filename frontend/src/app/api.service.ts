@@ -6,6 +6,7 @@ import { SessionInfo } from './models';
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   readonly csrf = signal('');
+  private readonly basePath = new URL(document.baseURI).pathname.replace(/\/$/, '');
 
   constructor(private readonly http: HttpClient) {}
 
@@ -22,14 +23,18 @@ export class ApiService {
   }
 
   get<T>(path: string): Observable<T> {
-    return this.http.get<T>(path, { withCredentials: true }).pipe(catchError(this.failure));
+    return this.http.get<T>(this.url(path), { withCredentials: true }).pipe(catchError(this.failure));
   }
 
   post<T>(path: string, body: unknown, protectedRequest = true): Observable<T> {
     const headers = protectedRequest ? new HttpHeaders({ 'X-CSRF-Token': this.csrf() }) : undefined;
     return this.http
-      .post<T>(path, body, { headers, withCredentials: true })
+      .post<T>(this.url(path), body, { headers, withCredentials: true })
       .pipe(catchError(this.failure));
+  }
+
+  url(path: string) {
+    return `${this.basePath}${path}`;
   }
 
   private failure(error: HttpErrorResponse) {

@@ -4,6 +4,7 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { forkJoin } from 'rxjs';
 import { ApiService } from './api.service';
 import { AuditComponent } from './audit.component';
+import { CodexChatComponent } from './codex-chat.component';
 import { HostsComponent } from './hosts.component';
 import { LoginComponent } from './login.component';
 import {
@@ -31,6 +32,7 @@ import { TerminalComponent } from './terminal.component';
     TerminalComponent,
     SettingsComponent,
     AuditComponent,
+    CodexChatComponent,
   ],
   selector: 'app-root',
   styleUrl: './app.scss',
@@ -52,11 +54,13 @@ export class App implements OnInit {
     verified: false,
   });
   readonly audit = signal<AuditEvent[]>([]);
+  readonly codexHost = signal('');
   readonly nav = [
     ['overview', '总览', '◫'],
     ['hosts', '主机', '⌘'],
     ['network', '网络借助', '↗'],
     ['terminal', '终端', '>_'],
+    ['codex', 'Codex 对话', '✦'],
     ['settings', '安全', '◇'],
     ['audit', '审计', '≡'],
   ];
@@ -64,6 +68,11 @@ export class App implements OnInit {
     this.page.set(value);
     if (value === 'settings' || value === 'audit') this.refresh();
   };
+  readonly navigateCodex = (hostId: string) => {
+    this.codexHost.set(hostId);
+    this.page.set('codex');
+  };
+  private probesStarted = false;
   constructor(private readonly api: ApiService) {}
   ngOnInit() {
     this.bootstrap();
@@ -82,7 +91,7 @@ export class App implements OnInit {
       },
     });
   }
-  refresh() {
+  refresh(forceProbes = false) {
     this.busy.set(true);
     forkJoin({
       hosts: this.api.get<{ hosts: Host[] }>('/api/hosts'),
@@ -98,6 +107,10 @@ export class App implements OnInit {
         this.security.set(value.security);
         this.audit.set(value.audit.events);
         this.busy.set(false);
+        if (value.hosts.hosts.length && (forceProbes || !this.probesStarted)) {
+          this.probesStarted = true;
+          this.refreshProbes(value.hosts.hosts.map((host) => host.id));
+        }
       },
       error: (e) => {
         if (e.message === '请先登录') {
@@ -106,6 +119,12 @@ export class App implements OnInit {
         this.error.set(e.message);
         this.busy.set(false);
       },
+    });
+  }
+  refreshProbes(ids: string[]) {
+    this.api.post<{ results: ProbeResult[] }>('/api/network/probe', { ids }).subscribe({
+      next: (value) => this.probes.set(value.results),
+      error: (e) => this.error.set(`服务器状态刷新失败：${e.message}`),
     });
   }
   logout() {

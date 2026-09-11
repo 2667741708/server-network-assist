@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 - 2026-09-11
+
+- Add explicit OpenSSH alias import with encrypted private-key storage, pinned known-host keys and ProxyJump chains.
+- Automatically refresh SSH, internet and Codex CLI availability after login.
+- Add per-server Codex CLI conversations with persisted sessions, polling, cancellation and read-only/workspace-write sandboxes.
+- Support hosting the console under an HTTPS path prefix such as `/network-assist/`.
+- Add host-level Codex enablement and a default remote workspace.
+
 ## 0.2.0 - 2026-09-10
 
 - Add a local desktop panel with an independent app window, desktop shortcut, WireGuard status and connection controls.

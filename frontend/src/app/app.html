@@ -21,7 +21,7 @@
         }
       </nav>
       <div class="sidebar-foot">
-        <button mat-button (click)="refresh()">刷新数据</button
+        <button mat-button (click)="refresh(true)">刷新数据</button
         ><button mat-button (click)="logout()">退出登录</button>
       </div>
     </aside>
@@ -39,6 +39,7 @@
             [profiles]="profiles()"
             [probes]="probes()"
             [navigate]="navigate"
+            [navigateCodex]="navigateCodex"
           />
         }
         @case ('hosts') {
@@ -56,6 +57,14 @@
         @case ('terminal') {
           <app-terminal [hosts]="hosts()" />
         }
+        @case ('codex') {
+          <app-codex-chat
+            [hosts]="hosts()"
+            [probes]="probes()"
+            [requestedHost]="codexHost()"
+            (requestedHostChange)="codexHost.set($event)"
+          />
+        }
         @case ('settings') {
           <app-settings [security]="security()" (changed)="refresh()" />
         }
@@ -65,7 +74,7 @@
       }
     </main>
     <nav class="mobile-nav" aria-label="移动端主导航">
-      @for (item of nav.slice(0, 5); track item[0]) {
+      @for (item of nav.slice(0, 6); track item[0]) {
         <button [class.active]="page() === item[0]" (click)="navigate(item[0])">
           <span>{{ item[2] }}</span
           ><small>{{ item[1] }}</small>

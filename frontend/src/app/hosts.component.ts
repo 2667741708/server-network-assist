@@ -103,10 +103,16 @@ import { Credential, Host } from './models';
             ><textarea matInput rows="4" [(ngModel)]="draft.host_key"></textarea
             ><mat-hint>先保存基本信息，再读取并人工核对指纹。</mat-hint></mat-form-field
           >
+          <mat-form-field appearance="outline" class="wide"
+            ><mat-label>Codex 默认工作目录（可选）</mat-label
+            ><input matInput [(ngModel)]="draft.codex_workspace"
+            /><mat-hint>留空时使用远端 SSH 账号的主目录。</mat-hint></mat-form-field
+          >
         </div>
         <div class="check-row">
           <mat-checkbox [(ngModel)]="draft.favorite">收藏</mat-checkbox
-          ><mat-checkbox [(ngModel)]="draft.terminal_enabled">允许网页终端</mat-checkbox>
+          ><mat-checkbox [(ngModel)]="draft.terminal_enabled">允许网页终端</mat-checkbox
+          ><mat-checkbox [(ngModel)]="draft.codex_enabled">允许 Codex 对话</mat-checkbox>
         </div>
         <div class="button-row">
           <button mat-flat-button (click)="save()">保存</button
@@ -176,6 +182,8 @@ export class HostsComponent {
       group: '',
       favorite: false,
       terminal_enabled: true,
+      codex_enabled: true,
+      codex_workspace: '',
     };
   }
   newHost() {
