@@ -532,6 +532,45 @@ p {
   max-width: 900px;
   margin: 0 auto 20px;
 }
+.browser-card {
+  min-height: calc(100dvh - 190px);
+  overflow: hidden;
+}
+.browser-toolbar,
+.browser-input {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+}
+.browser-toolbar mat-form-field,
+.browser-input mat-form-field {
+  margin-bottom: -20px;
+}
+.browser-address,
+.browser-input mat-form-field {
+  flex: 1;
+  min-width: 220px;
+}
+.browser-screen {
+  min-height: 560px;
+  background: #17191d;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  outline: none;
+}
+.browser-screen img {
+  display: block;
+  width: min(100%, 1280px);
+  height: auto;
+  user-select: none;
+}
+.browser-input span {
+  max-width: 320px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .chat-message > span {
   display: block;
   color: var(--accent);
@@ -752,6 +791,14 @@ p {
   .composer {
     align-items: stretch;
     flex-direction: column;
+  }
+  .browser-toolbar,
+  .browser-input {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .browser-screen {
+    min-height: 360px;
   }
   .credential-row {
     display: grid;

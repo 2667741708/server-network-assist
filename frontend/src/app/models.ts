@@ -25,6 +25,7 @@ export interface Host {
   favorite: boolean;
   terminal_enabled: boolean;
   codex_enabled: boolean;
+  browser_enabled: boolean;
   codex_workspace: string;
 }
 
@@ -67,6 +68,8 @@ export interface ProbeResult {
   gateway_supported?: boolean;
   codex?: boolean;
   codex_version?: string;
+  browser?: boolean;
+  browser_name?: string;
   error: string;
 }
 

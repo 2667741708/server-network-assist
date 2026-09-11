@@ -147,6 +147,7 @@ def import_aliases(state, config: Path, aliases: list[str], group: str = "SSH ç»
             "favorite": alias in requested,
             "terminal_enabled": True,
             "codex_enabled": True,
+            "browser_enabled": True,
             "codex_workspace": "",
         })
         imported[alias] = host

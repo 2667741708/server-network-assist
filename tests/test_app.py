@@ -179,6 +179,20 @@ class ConsoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await ws.receive(timeout=5)).type.name, 'CLOSE')
         await ws.close()
 
+    async def test_browser_ticket_is_scoped_and_rejects_unsafe_urls(self):
+        response = await self.post('browser/ticket', {'id': self.host['id'], 'url': 'https://chatgpt.com/'})
+        self.assertEqual(response.status, 200)
+        ticket = (await response.json())['ticket']
+        self.assertEqual(self.state.tickets[ticket]['kind'], 'browser')
+        self.assertEqual((await self.post('browser/ticket', {
+            'id': self.host['id'], 'url': 'file:///etc/passwd'})).status, 400)
+        self.assertEqual((await self.post('browser/ticket', {
+            'id': self.host['id'], 'url': 'https://user:secret@example.com/'})).status, 400)
+        ws = await self.client.ws_connect('/ws', headers={'Origin': self.origin})
+        await ws.send_json({'ticket': ticket})
+        self.assertEqual((await ws.receive(timeout=5)).type.name, 'CLOSE')
+        await ws.close()
+
     async def test_reauth_and_password_change(self):
         self.state.recent.clear()
         self.assertEqual((await self.post('credential/save',{'name':'new','kind':'password','secret':'abc'})).status,403)

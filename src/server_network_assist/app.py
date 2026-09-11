@@ -46,6 +46,7 @@ class State:
         self.tickets = {}
         self.sockets = {}
         self.codex_jobs = {}
+        self.browser_hosts = set()
         self.failed = {}
         self.operations = asyncio.Semaphore(8)
         self.network_changes = asyncio.Lock()
@@ -147,6 +148,7 @@ class State:
         h['favorite'] = bool(p.get('favorite'))
         h['terminal_enabled'] = bool(p.get('terminal_enabled', True))
         h['codex_enabled'] = bool(p.get('codex_enabled', True))
+        h['browser_enabled'] = bool(p.get('browser_enabled', True))
         h['codex_workspace'] = str(p.get('codex_workspace', '')).strip()
         if len(h['codex_workspace']) > 1024 or any(value in h['codex_workspace'] for value in ('\x00', '\r', '\n')):
             raise ValueError('Codex 工作目录无效')
@@ -414,18 +416,36 @@ async def network_probe_host(state, host_id):
                 codex_ready = codex.exit_status == 0
             except (OSError, asyncio.TimeoutError, asyncssh.Error):
                 codex_version, codex_ready = [], False
+            try:
+                if platform == 'windows':
+                    browser_command = ('powershell.exe -NoProfile -NonInteractive -Command '
+                        '"$p=@(\'C:/Program Files/Google/Chrome/Application/chrome.exe\','
+                        '\'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe\','
+                        '\'C:/Program Files/Microsoft/Edge/Application/msedge.exe\');'
+                        '$x=$p|Where-Object {Test-Path -LiteralPath $_}|Select-Object -First 1;'
+                        'if($x){[IO.Path]::GetFileName($x)}"')
+                else:
+                    browser_command = "command -v google-chrome || command -v chromium || command -v chromium-browser || command -v microsoft-edge"
+                browser_result = await connection.run(browser_command, timeout=12, check=False)
+                browser_values = (browser_result.stdout or '').strip().splitlines()
+                browser_ready = browser_result.exit_status == 0 and bool(browser_values)
+            except (OSError, asyncio.TimeoutError, asyncssh.Error):
+                browser_values, browser_ready = [], False
         value = parse_probe(result.stdout, result.exit_status)
         error = (result.stderr or '远端探测失败')[:1000] if result.exit_status else ''
         value.update(id=host_id, name=host['name'], address=host['address'], error=error,
                      codex=codex_ready,
-                     codex_version=codex_version[-1][:120] if codex_version else '')
+                     codex_version=codex_version[-1][:120] if codex_version else '',
+                     browser=browser_ready,
+                     browser_name=browser_values[-1][:160] if browser_values else '')
         return value
     except Exception as exc:
         message = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         return {'id': host_id, 'name': host['name'], 'address': host['address'],
                 'ssh': False, 'dns': False, 'internet': False, 'helper': False,
                 'hostname': '', 'os': '', 'default_route': '', 'http_code': '000',
-                'assist': [], 'codex': False, 'codex_version': '', 'error': message[:1000]}
+                'assist': [], 'codex': False, 'codex_version': '', 'browser': False,
+                'browser_name': '', 'error': message[:1000]}
 
 
 def _codex_command(platform, session):
@@ -859,7 +879,26 @@ def create_app(data, key_file):
             if len(state.tickets) >= 100:
                 raise web.HTTPTooManyRequests(text='连接请求过多')
             state.tickets[ticket] = {'session': session['token_hash'], 'id': h['id'], 'expires': now+30,
+                                     'kind': 'terminal',
                                      'persistent': bool(p.get('persistent')), 'route': state.route(h['id'])}
+            return web.json_response({'ticket': ticket})
+        if path == '/api/browser/ticket':
+            h = state.host(p.get('id'))
+            if not h or not h.get('browser_enabled', True):
+                raise ValueError('该主机未启用浏览器标签')
+            url = str(p.get('url', 'https://chatgpt.com/')).strip()
+            parsed = urlsplit(url)
+            if (parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or
+                    parsed.password or len(url) > 4096):
+                raise ValueError('浏览器地址必须是普通 HTTP(S) 地址')
+            ticket = secrets.token_urlsafe(32)
+            now = time.time()
+            state.tickets = {k: v for k, v in state.tickets.items() if v['expires'] > now}
+            if len(state.tickets) >= 100:
+                raise web.HTTPTooManyRequests(text='连接请求过多')
+            state.tickets[ticket] = {'session': session['token_hash'], 'id': h['id'],
+                                     'expires': now + 30, 'kind': 'browser', 'url': url,
+                                     'route': state.route(h['id'])}
             return web.json_response({'ticket': ticket})
         if path == '/api/codex/session/create':
             fresh(state, session)
@@ -1059,7 +1098,8 @@ def create_app(data, key_file):
         try:
             message = await ws.receive_json(timeout=10)
             ticket = state.tickets.pop(message.get('ticket', ''), None)
-            if not ticket or ticket['expires'] < time.time() or ticket['session'] != session['token_hash']:
+            if (not ticket or ticket.get('kind') != 'terminal' or ticket['expires'] < time.time() or
+                    ticket['session'] != session['token_hash']):
                 await ws.close(code=1008, message=b'Invalid ticket')
                 return ws
             h = state.host(ticket['id'])
@@ -1129,6 +1169,92 @@ def create_app(data, key_file):
             state.sockets.pop(id(ws), None)
         return ws
 
+    async def browser_websocket(request):
+        session = current(state, request)
+        if not session:
+            raise web.HTTPUnauthorized(text='请先登录')
+        if len(state.sockets) >= 12:
+            raise web.HTTPTooManyRequests(text='远程连接数量已达上限')
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=16384, compress=False)
+        await ws.prepare(request)
+        state.sockets[id(ws)] = ws
+        jobs = []
+        temporary = ''
+        try:
+            message = await ws.receive_json(timeout=10)
+            ticket = state.tickets.pop(message.get('ticket', ''), None)
+            if (not ticket or ticket.get('kind') != 'browser' or ticket['expires'] < time.time() or
+                    ticket['session'] != session['token_hash']):
+                await ws.close(code=1008, message=b'Invalid ticket')
+                return ws
+            host = state.host(ticket['id'])
+            if not host or not host.get('browser_enabled', True) or state.route(host['id']) != ticket['route']:
+                raise ValueError('主机已移除、配置改变或浏览器标签已禁用')
+            if host['id'] in state.browser_hosts:
+                raise ValueError('这台服务器已有浏览器标签正在使用')
+            state.browser_hosts.add(host['id'])
+            async with ssh_route(state, host['id']) as connection:
+                platform = await detect_platform(connection)
+                async with connection.start_sftp_client() as sftp:
+                    home = await sftp.realpath('.')
+                    temporary = home.rstrip('/') + '/sna-browser-' + secrets.token_hex(8) + '.py'
+                    await sftp.put(str(ROOT / 'browser_bridge.py'), temporary)
+                python_arguments = ['python3']
+                if platform == 'windows':
+                    python_arguments = []
+                    for candidate in (['python.exe'], ['python'], ['py.exe', '-3']):
+                        probe = await connection.run(subprocess.list2cmdline(candidate + ['--version']),
+                                                     timeout=10, check=False)
+                        if probe.exit_status == 0:
+                            python_arguments = candidate
+                            break
+                    if not python_arguments:
+                        raise ValueError('远端 Windows 未找到可用 Python，无法启动浏览器桥接')
+                arguments = python_arguments + [temporary, ticket['url']]
+                command = subprocess.list2cmdline(arguments) if platform == 'windows' else shlex.join(arguments)
+                async with connection.create_process(command, encoding='utf-8') as process:
+                    state.audit('browser_open', host['name'])
+
+                    async def stream():
+                        while not ws.closed:
+                            line = await process.stdout.readline()
+                            if not line:
+                                break
+                            await ws.send_str(line.rstrip('\r\n'))
+
+                    jobs.append(asyncio.create_task(stream()))
+                    async for item in ws:
+                        if item.type != WSMsgType.TEXT:
+                            continue
+                        if not current(state, request) or state.route(host['id']) != ticket['route']:
+                            await ws.close(code=1008)
+                            break
+                        event = json.loads(item.data)
+                        if event.get('type') not in ('navigate', 'click', 'text', 'key'):
+                            continue
+                        process.stdin.write(json.dumps(event, ensure_ascii=False) + '\n')
+                        await process.stdin.drain()
+                    process.terminate()
+                with contextlib.suppress(Exception):
+                    await connection.run(shlex.join(['rm', '-f', '--', temporary]) if platform != 'windows'
+                                         else subprocess.list2cmdline(['cmd.exe', '/c', 'del', '/q', temporary]),
+                                         timeout=10, check=False)
+            state.audit('browser_closed', host['name'])
+        except Exception as error:
+            if not ws.closed:
+                with contextlib.suppress(Exception):
+                    await ws.send_json({'type': 'error', 'message': str(error) if isinstance(error, ValueError)
+                                        else f'浏览器连接结束（{type(error).__name__}）'})
+                await ws.close()
+        finally:
+            for job in jobs:
+                job.cancel()
+            await asyncio.gather(*jobs, return_exceptions=True)
+            state.sockets.pop(id(ws), None)
+            if 'host' in locals():
+                state.browser_hosts.discard(host['id'])
+        return ws
+
     async def static(request):
         name = request.match_info.get('name', '') or 'index.html'
         root = (ROOT / 'ui').resolve()
@@ -1150,6 +1276,7 @@ def create_app(data, key_file):
         await asyncio.gather(*(ws.close(code=1001) for ws in list(state.sockets.values())), return_exceptions=True)
     app.on_shutdown.append(shutdown)
     app.router.add_get('/ws', websocket)
+    app.router.add_get('/ws/browser', browser_websocket)
     app.router.add_get('/api/{tail:.*}', get)
     app.router.add_post('/api/{tail:.*}', post)
     app.router.add_get('/', static)

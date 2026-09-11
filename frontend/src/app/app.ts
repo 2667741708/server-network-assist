@@ -5,6 +5,7 @@ import { forkJoin } from 'rxjs';
 import { ApiService } from './api.service';
 import { AuditComponent } from './audit.component';
 import { CodexChatComponent } from './codex-chat.component';
+import { BrowserComponent } from './browser.component';
 import { HostsComponent } from './hosts.component';
 import { LoginComponent } from './login.component';
 import {
@@ -33,6 +34,7 @@ import { TerminalComponent } from './terminal.component';
     SettingsComponent,
     AuditComponent,
     CodexChatComponent,
+    BrowserComponent,
   ],
   selector: 'app-root',
   styleUrl: './app.scss',
@@ -61,6 +63,7 @@ export class App implements OnInit {
     ['network', '网络借助', '↗'],
     ['terminal', '终端', '>_'],
     ['codex', 'Codex 对话', '✦'],
+    ['browser', '浏览器', '◎'],
     ['settings', '安全', '◇'],
     ['audit', '审计', '≡'],
   ];

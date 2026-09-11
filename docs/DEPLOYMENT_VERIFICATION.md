@@ -64,3 +64,11 @@ python -m unittest discover -s tests -p test_project_deployment.py -v
 2026-09-11，管理台已升级至 `0.4.2`。Codex 页面通过远端 CLI 的 app-server 协议读取真实会话、完整消息和项目目录，并从 `model/list` 动态取得当前账号可用模型、推理强度与 Fast 支持情况。历史会话可在面板中接续；新会话可选择项目目录、只读或工作区可写权限、模型、推理档位和速度。
 
 本地验证为 Angular 生产构建成功、Python 全套测试 `102 passed, 1 skipped`。cloud 上 wheel SHA256 为 `6e601ec254ed52dd577adced7d531c6349a83c0de7efdbf8352e453516879f27`；安装后包版本返回 `0.4.2`，服务为 `active`，回环路径 `/network-assist/` 返回 HTTP 200。
+
+## 服务器浏览器标签 0.4.3
+
+管理台增加服务器浏览器页面。它在目标服务器上启动回环绑定的 Chrome/Edge CDP，并使用独立、持久的服务器配置目录；CDP 端口不监听局域网或公网。画面、点击、导航和键盘输入封装在一次性管理台票据和原有锁定主机指纹的 SSH 会话内。地址仅允许不带内嵌账号密码的 HTTP(S) URL，浏览器票据不能用于终端 WebSocket。
+
+Titan 实机验证确认 Chrome 和 Edge 均存在，浏览器桥成功打开 `https://chatgpt.com/` 并产生 `ready → location → frame` 事件。首次登录需要用户在远端画面中完成；登录资料保存在 Titan 的专用浏览器配置中，不复制回 cloud 数据库。
+
+0.4.3 本地全套测试为 `103 passed, 1 skipped`，最终 wheel SHA256 为 `ef55914735c2c6bcea09a86c22da33c62a6c680bafd5bfc0a69bcec98f560c10`。
