@@ -31,9 +31,17 @@ npm run build:preview
 
 ## GitHub 登录和发布接入
 
-当前没有 GitHub OAuth App，线上登录和最终发布尚未验证。管理员需部署或选用 Decap 官方文档列出的兼容 OAuth 服务，然后在 GitHub OAuth App 填写该服务文档指定的 callback；callback 属于认证服务，不是静态 `/projects/admin/` 页面。
+生产登录采用仓库内的 `services/decap-oauth/` proxy：云端只监听
+`127.0.0.1:9190`，Caddy 在现有 `whm12.art` HTTPS 站点下转发
+`/projects/oauth/*`。GitHub OAuth App 的精确 callback 是
+`https://whm12.art/projects/oauth/callback`；它不属于静态
+`/projects/admin/` 页面。完整部署步骤见 [GITHUB_OAUTH_SETUP.md](../site/blog/GITHUB_OAUTH_SETUP.md)。
 
-构建变量：`BLOG_OAUTH_BASE_URL` 为认证服务 origin，`BLOG_OAUTH_ENDPOINT` 为发起认证的相对路径（默认 auth）。Client ID/secret 保留在认证服务，绝不写入静态配置。backend 固定为 `2667741708/server-network-assist` 的 main 分支。未配置时，线上后台明确显示尚未接通登录，前台照常可读。
+构建变量：`BLOG_OAUTH_BASE_URL=https://whm12.art`，
+`BLOG_OAUTH_ENDPOINT=projects/oauth/auth`。Client ID/secret 和 state secret
+保留在 OAuth service，绝不写入静态配置。backend 固定为
+`2667741708/server-network-assist` 的 main 分支。未配置时，线上后台明确显示
+尚未接通登录，前台照常可读。
 
 发布预览还需要 CI 对 CMS 草稿分支构建 `build:preview`，并通过 Decap 的 deploy preview 状态返回独立预览 URL。静态 CMS 右栏预览不等于 AstroPaper 完整主题预览；本轮尚未接通远程分支预览服务。
 

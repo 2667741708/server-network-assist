@@ -1,0 +1,22 @@
+[Unit]
+Description=Decap CMS GitHub OAuth proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=decap-oauth
+Group=decap-oauth
+WorkingDirectory=/opt/decap-oauth
+EnvironmentFile=/etc/decap-oauth.env
+ExecStart=/usr/bin/python3 /opt/decap-oauth/decap_oauth_proxy.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
