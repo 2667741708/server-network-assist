@@ -10,6 +10,7 @@ import Socials from "@/components/Socials.astro";
 import Card from "@/components/Card.astro";
 import LinkButton from "@/components/LinkButton.astro";
 import { getSortedPosts } from "@/utils/getSortedPosts";
+import { slugifyStr } from "@/utils/slugify";
 import { useTranslations } from "@/i18n";
 import config from "@/config";
 
@@ -20,8 +21,16 @@ const t = useTranslations(locale);
 
 const posts = await getCollection("posts");
 const sortedPosts = getSortedPosts(posts);
-const featuredPosts = sortedPosts.filter(({ data }) => data.featured);
-const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
+const quickQuestionsTag = slugifyStr("快速疑问");
+const quickQuestions = sortedPosts.filter(
+  ({ data }) => data.articleType === "快速疑问",
+);
+const featuredPosts = sortedPosts.filter(
+  ({ data }) => data.featured && data.articleType !== "快速疑问",
+);
+const recentPosts = sortedPosts.filter(
+  ({ data }) => !data.featured && data.articleType !== "快速疑问",
+);
 const homePath = getRelativeLocaleUrl(locale, "");
 ---
 
@@ -52,8 +61,14 @@ const homePath = getRelativeLocaleUrl(locale, "");
         <span class="sr-only">RSS Feed</span>
       </a>
 
-      <p>记录网络、开发工具与研究项目中的问题、实现和使用方法。每篇文章都从一个具体任务出发。</p>
-      <p class="mt-2"><LinkButton class="underline" href="/projects/catalog/">浏览全部项目</LinkButton> · <a href="/projects/admin/" data-astro-reload>写一篇文章</a></p>
+      <p>
+        记录网络、开发工具与研究项目中的问题、实现和使用方法。每篇文章都从一个具体任务出发。
+      </p>
+      <p class="mt-2">
+        <LinkButton class="underline" href="/projects/catalog/"
+          >浏览全部项目</LinkButton
+        > · <a href="/projects/admin/" data-astro-reload>写一篇文章</a>
+      </p>
       {
         socials.length > 0 && (
           <div class="mt-4 flex max-sm:flex-col sm:items-center">
@@ -79,7 +94,29 @@ const homePath = getRelativeLocaleUrl(locale, "");
             {t.home.featured}
           </h2>
           <ul>
-            {featuredPosts.map(data => (
+            {featuredPosts.map((data) => (
+              <Card variant="h3" {...data} />
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    {
+      quickQuestions.length > 0 && (
+        <section id="quick-questions" class="border-border border-b pt-10 pb-6">
+          <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+            <h2 class="text-2xl font-semibold tracking-wide">快速疑问</h2>
+            <a
+              class="text-accent underline underline-offset-4"
+              href={getRelativeLocaleUrl(locale, `tags/${quickQuestionsTag}/`)}
+            >
+              查看全部快速疑问
+            </a>
+          </div>
+          <p class="mt-2">先回答最常遇到的小问题，再决定是否需要深入配置。</p>
+          <ul>
+            {quickQuestions.slice(0, postsConfig.perIndex).map((data) => (
               <Card variant="h3" {...data} />
             ))}
           </ul>
@@ -94,7 +131,7 @@ const homePath = getRelativeLocaleUrl(locale, "");
             {t.home.recentPosts}
           </h2>
           <ul>
-            {recentPosts.slice(0, postsConfig.perIndex).map(data => (
+            {recentPosts.slice(0, postsConfig.perIndex).map((data) => (
               <Card variant="h3" {...data} />
             ))}
           </ul>
