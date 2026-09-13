@@ -46,6 +46,7 @@ class CodexChatTests(unittest.TestCase):
         session = {'remote_thread_id':'', 'sandbox':'workspace-write', 'workspace':'/srv/a folder',
                    'model':'gpt-5.6-sol', 'reasoning_effort':'high', 'service_tier':'priority'}
         command = _codex_command('linux', session)
+        self.assertIn('$HOME/.local/bin', command)
         self.assertIn("'/srv/a folder'", command)
         self.assertIn("gpt-5.6-sol", command)
         self.assertIn('model_reasoning_effort="high"', command)

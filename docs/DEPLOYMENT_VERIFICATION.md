@@ -72,3 +72,9 @@ python -m unittest discover -s tests -p test_project_deployment.py -v
 Titan 实机验证确认 Chrome 和 Edge 均存在，浏览器桥成功打开 `https://chatgpt.com/` 并产生 `ready → location → frame` 事件。首次登录需要用户在远端画面中完成；登录资料保存在 Titan 的专用浏览器配置中，不复制回 cloud 数据库。
 
 0.4.3 本地全套测试为 `103 passed, 1 skipped`，最终 wheel SHA256 为 `ef55914735c2c6bcea09a86c22da33c62a6c680bafd5bfc0a69bcec98f560c10`。
+
+## Codex 非交互 PATH 修复 0.4.4
+
+Linux 主机上的 Codex 可能安装在 `~/.local/bin` 或 `~/.npm-global/bin`。0.4.4 在探测、App Server 历史读取和消息执行时显式补充这两个目录，避免 SSH 非交互会话因未加载登录 shell 配置而误报“未安装 Codex”。
+
+线上验证确认 c201-4090、c201-5080 与 d408 均能返回真实 Codex 模型、会话和项目目录。最终 wheel SHA256 为 `8c36a6b1a780828d543aecc151f25da54d8538ec68542a1bd2211daa3d186363`。

@@ -411,7 +411,7 @@ async def network_probe_host(state, host_id):
             else:
                 result = await connection.run(probe_command(), timeout=20, check=False)
             try:
-                codex = await connection.run('codex --version', timeout=12, check=False)
+                codex = await connection.run(_codex_prefix(platform) + 'codex --version', timeout=12, check=False)
                 codex_version = (codex.stdout or '').strip().splitlines()
                 codex_ready = codex.exit_status == 0
             except (OSError, asyncio.TimeoutError, asyncssh.Error):
@@ -448,6 +448,12 @@ async def network_probe_host(state, host_id):
                 'browser_name': '', 'error': message[:1000]}
 
 
+def _codex_prefix(platform):
+    if platform == 'windows':
+        return ''
+    return 'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"; '
+
+
 def _codex_command(platform, session):
     if session['remote_thread_id']:
         arguments = ['codex', 'exec', 'resume', '--json', '--skip-git-repo-check',
@@ -468,12 +474,13 @@ def _codex_command(platform, session):
         if any(any(char in value for char in '&|<>^%\r\n') for value in arguments):
             raise ValueError('Windows Codex 参数包含不安全字符')
         return subprocess.list2cmdline(arguments)
-    return shlex.join(arguments)
+    return _codex_prefix(platform) + shlex.join(arguments)
 
 
-async def _codex_app_request(connection, method, params, timeout=45):
+async def _codex_app_request(connection, platform, method, params, timeout=45):
     """Issue one protocol request against the remote CLI's stdio app-server."""
-    process = await connection.create_process('codex app-server --stdio', encoding='utf-8')
+    process = await connection.create_process(
+        _codex_prefix(platform) + 'codex app-server --stdio', encoding='utf-8')
 
     async def exchange(request_id, request_method, request_params):
         value = {'id': request_id, 'method': request_method, 'params': request_params}
@@ -508,8 +515,9 @@ async def codex_remote_catalog(state, host_id):
     if not host or not host.get('codex_enabled', True):
         raise ValueError('该主机未启用 Codex 对话')
     async with state.operations, ssh_route(state, host_id) as connection:
-        models = await _codex_app_request(connection, 'model/list', {'limit': 100})
-        threads = await _codex_app_request(connection, 'thread/list', {
+        platform = await detect_platform(connection)
+        models = await _codex_app_request(connection, platform, 'model/list', {'limit': 100})
+        threads = await _codex_app_request(connection, platform, 'thread/list', {
             'limit': 100, 'archived': False, 'sourceKinds': [
                 'cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview',
                 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown'],
@@ -533,7 +541,8 @@ async def codex_remote_thread(state, host_id, thread_id):
     if not host or not host.get('codex_enabled', True):
         raise ValueError('该主机未启用 Codex 对话')
     async with state.operations, ssh_route(state, host_id) as connection:
-        return await _codex_app_request(connection, 'thread/read', {
+        platform = await detect_platform(connection)
+        return await _codex_app_request(connection, platform, 'thread/read', {
             'threadId': thread_id, 'includeTurns': True}, timeout=60)
 
 
