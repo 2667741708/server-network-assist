@@ -15,6 +15,7 @@
 - Xterm.js 网页终端，支持可选 tmux 持久会话
 - 远端 Codex CLI 对话：点击服务器创建类似 ChatGPT 的独立会话，并显示 CLI 可用状态
 - 远端 Clash/Mihomo 控制：切换规则、全局、直连模式，选择策略组节点，控制 Windows 系统代理与 TUN，并添加最高优先级规则
+- 命令行控制：列出源网服务器和借网客户端，创建、启用、退出方案，并执行同一套 Clash/TUN 操作
 - 本地加密凭据库、CSRF/Origin 防护、会话撤销、审计日志与 WebAuthn 通行密钥
 - Angular Material 响应式界面，桌面、平板和手机均可使用
 - 本机桌面面板：独立多机网络共享配置、源代理选择、代理备份恢复、实时速率与历史、诊断日志、原生托盘和更新入口
@@ -24,6 +25,8 @@
 图文原理、交互路径示意和完整实践文章见 [项目博客](docs/blog/README.md)（本地打开 `docs/blog/index.html`）。新增共享能力的前提、作用范围与验证边界见 [跨平台共享与代理指南](docs/SHARING.md)。
 
 管理台的“代理与 TUN”页面通过 SSH 在目标机器本机访问 Clash Controller，密钥不会返回浏览器。详细支持范围、前置配置、备份与回退规则见 [远端 Clash 控制指南](docs/CLASH_CONTROL.md)。
+
+服务器终端可使用 `server-network-assist-ctl` 完成相同的借网与代理操作，命令示例见 [CLI 指南](docs/CLI.md)。
 
 ## 桌面面板
 

@@ -7,7 +7,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { ApiService } from './api.service';
-import { Credential, Host } from './models';
+import { Credential, Host, NetworkProfile } from './models';
 
 @Component({
   selector: 'app-hosts',
@@ -45,6 +45,7 @@ import { Credential, Host } from './models';
                 <th>名称</th>
                 <th>地址</th>
                 <th>路径</th>
+                <th>网络角色</th>
                 <th>终端</th>
                 <th></th>
               </tr>
@@ -55,6 +56,7 @@ import { Credential, Host } from './models';
                   <td class="long-value">{{ host.name }}</td>
                   <td class="mono long-value">{{ host.address }}:{{ host.port }}</td>
                   <td class="long-value">{{ route(host) }}</td>
+                  <td class="long-value">{{ roles(host.id) }}</td>
                   <td>{{ host.terminal_enabled ? '启用' : '关闭' }}</td>
                   <td><button mat-button (click)="edit(host)">编辑</button></td>
                 </tr>
@@ -161,6 +163,7 @@ import { Credential, Host } from './models';
 export class HostsComponent {
   @Input({ required: true }) hosts: Host[] = [];
   @Input({ required: true }) credentials: Credential[] = [];
+  @Input() profiles: NetworkProfile[] = [];
   @Output() changed = new EventEmitter<void>();
   readonly message = signal('');
   readonly failed = signal(false);
@@ -197,6 +200,14 @@ export class HostsComponent {
   route(host: Host) {
     const jump = this.hosts.find((value) => value.id === host.jump_id);
     return jump ? `${jump.name} → ${host.name}` : '直连';
+  }
+  roles(hostId: string) {
+    const values: string[] = [];
+    for (const profile of this.profiles) {
+      if (profile.gateway_id === hostId) values.push(`源网服务器 · ${profile.name}`);
+      if (profile.client_ids.includes(hostId)) values.push(`借网客户端 · ${profile.name}`);
+    }
+    return values.join('；') || '尚未分配';
   }
   notify(message: string, failed = false) {
     this.message.set(message);

@@ -43,7 +43,7 @@
           />
         }
         @case ('hosts') {
-          <app-hosts [hosts]="hosts()" [credentials]="credentials()" (changed)="refresh()" />
+          <app-hosts [hosts]="hosts()" [credentials]="credentials()" [profiles]="profiles()" (changed)="refresh()" />
         }
         @case ('network') {
           <app-network
