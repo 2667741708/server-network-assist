@@ -73,6 +73,23 @@ export interface ProbeResult {
   error: string;
 }
 
+export interface ClashStatus {
+  installed: boolean;
+  running: boolean;
+  controller: boolean;
+  version?: string;
+  config_path?: string;
+  mode: string;
+  mixed_port: number;
+  tun: boolean;
+  system_proxy?: { supported: boolean; enabled: boolean | null; server?: string; reason?: string };
+  rules?: Array<{ type?: string; payload?: string; proxy?: string }>;
+  policies?: string[];
+  groups?: Array<{ name: string; type: string; now: string; all: string[] }>;
+  backup?: string;
+  error?: string;
+}
+
 export interface CodexMessage {
   id: number;
   role: 'user' | 'assistant';

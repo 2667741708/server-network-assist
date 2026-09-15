@@ -571,6 +571,38 @@ p {
   color: var(--muted);
   font-size: 12px;
 }
+.clash-card {
+  display: grid;
+  gap: 18px;
+}
+.clash-metrics {
+  margin: 0;
+}
+.status-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.status-list > div {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.status-list dt { color: var(--muted); }
+.status-list dd { min-width: 0; margin: 0; }
+.rule-list {
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+details summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 12px 0;
+}
 .chat-message > span {
   display: block;
   color: var(--accent);

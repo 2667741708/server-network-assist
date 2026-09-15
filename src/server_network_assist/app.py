@@ -641,6 +641,41 @@ async def _network_remote(state, host_id, action, payload=None, *args, timeout=6
     return _remote_json(result)
 
 
+async def clash_remote(state, host_id, payload):
+    host = state.host(host_id)
+    if not host:
+        raise ValueError('主机不存在')
+    source = ROOT / 'clash_control.py'
+    async with state.operations, ssh_route(state, host_id) as connection:
+        platform = await detect_platform(connection)
+        async with connection.start_sftp_client() as sftp:
+            home = await sftp.realpath('.')
+            if platform == 'windows':
+                temporary = home.rstrip('/') + '/sna-clash-' + secrets.token_hex(8) + '.py'
+                python_arguments = []
+                for candidate in (['python.exe'], ['python'], ['py.exe', '-3']):
+                    probe = await connection.run(subprocess.list2cmdline(candidate + ['--version']),
+                                                 timeout=10, check=False)
+                    if probe.exit_status == 0:
+                        python_arguments = candidate
+                        break
+                if not python_arguments:
+                    raise ValueError('远端 Windows 未找到可用 Python，无法控制 Clash')
+                command = subprocess.list2cmdline(python_arguments + [temporary])
+            else:
+                temporary = '/tmp/sna-clash-' + secrets.token_hex(8) + '.py'
+                command = shlex.join(['python3', temporary])
+            try:
+                await sftp.put(str(source), temporary)
+                result = await connection.run(command, input=json.dumps(payload, ensure_ascii=False),
+                                              timeout=45, check=False)
+            finally:
+                with contextlib.suppress(Exception):
+                    await sftp.remove(temporary)
+    value = _remote_json(result)
+    return value.get('result', {})
+
+
 async def network_enable_profile(state, profile_id):
     profile = state.network.get(profile_id)
     if not profile:
@@ -804,6 +839,9 @@ def create_app(data, key_file):
             return web.json_response({'credentials': state.credentials()})
         if path == '/api/network':
             return web.json_response({'profiles': state.network.profiles()})
+        if path == '/api/clash':
+            return web.json_response(await clash_remote(
+                state, request.query.get('host_id', ''), {'action': 'status'}))
         if path == '/api/codex/sessions':
             return web.json_response({'sessions': state.codex_sessions(request.query.get('host_id', ''))})
         if path == '/api/codex/session':
@@ -926,6 +964,15 @@ def create_app(data, key_file):
             state.codex_jobs[session_value['id']] = job
             state.audit('codex_turn_started', session_value['host_id'])
             return web.json_response({'session': state.codex_session(session_value['id'])})
+        if path == '/api/clash/action':
+            fresh(state, session)
+            host_id = str(p.get('host_id', ''))
+            action = str(p.get('action', ''))
+            if action not in ('mode', 'tun', 'system_proxy', 'rule_add', 'proxy_select'):
+                raise ValueError('不支持的 Clash 操作')
+            result = await clash_remote(state, host_id, p)
+            state.audit('clash_' + action, state.host(host_id)['name'])
+            return web.json_response(result)
         if path == '/api/codex/cancel':
             fresh(state, session)
             session_id = str(p.get('id', ''))

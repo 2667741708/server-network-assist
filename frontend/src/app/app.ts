@@ -6,6 +6,7 @@ import { ApiService } from './api.service';
 import { AuditComponent } from './audit.component';
 import { CodexChatComponent } from './codex-chat.component';
 import { BrowserComponent } from './browser.component';
+import { ClashComponent } from './clash.component';
 import { HostsComponent } from './hosts.component';
 import { LoginComponent } from './login.component';
 import {
@@ -35,6 +36,7 @@ import { TerminalComponent } from './terminal.component';
     AuditComponent,
     CodexChatComponent,
     BrowserComponent,
+    ClashComponent,
   ],
   selector: 'app-root',
   styleUrl: './app.scss',
@@ -64,6 +66,7 @@ export class App implements OnInit {
     ['terminal', '终端', '>_'],
     ['codex', 'Codex 对话', '✦'],
     ['browser', '浏览器', '◎'],
+    ['clash', '代理与 TUN', '◉'],
     ['settings', '安全', '◇'],
     ['audit', '审计', '≡'],
   ];
