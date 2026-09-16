@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -24,11 +25,25 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 
 
 def parse_enrollment_url(value: str) -> tuple[str, str]:
-    """Parse ``https://service/#enroll=...`` without putting the secret on the wire."""
+    """Parse an enrollment URL without sending its fragment to the server.
+
+    HTTPS remains valid everywhere. Plain HTTP is accepted only for literal
+    loopback/private/link-local addresses so a campus-only control plane does
+    not need a public domain or cloud reverse proxy.
+    """
     parts = urlsplit(value.strip())
-    loopback_http = parts.scheme == "http" and parts.hostname in {"127.0.0.1", "::1", "localhost"}
-    if (parts.scheme != "https" and not loopback_http) or not parts.netloc:
-        raise ValueError("开户注册地址必须使用 HTTPS")
+    local_http = False
+    if parts.scheme == "http" and parts.hostname:
+        if parts.hostname == "localhost":
+            local_http = True
+        else:
+            try:
+                address = ipaddress.ip_address(parts.hostname)
+                local_http = address.is_private or address.is_loopback or address.is_link_local
+            except ValueError:
+                local_http = False
+    if (parts.scheme != "https" and not local_http) or not parts.netloc:
+        raise ValueError("公网开户地址必须使用 HTTPS；HTTP 仅允许校园网私有 IP")
     if parts.username or parts.password or parts.query or parts.path not in ("", "/"):
         raise ValueError("开户注册地址格式无效")
     values = parse_qs(parts.fragment, strict_parsing=True).get("enroll", [])

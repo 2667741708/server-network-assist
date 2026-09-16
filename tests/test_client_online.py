@@ -81,6 +81,10 @@ class OnlineClientTests(unittest.TestCase):
         base, token = parse_enrollment_url('https://service.example.test/#enroll=one-time-secret-123')
         self.assertEqual(base, 'https://service.example.test')
         self.assertEqual(token, 'one-time-secret-123')
+        private_base, private_token = parse_enrollment_url(
+            'http://10.20.32.13:9182/#enroll=campus-one-time-token')
+        self.assertEqual(private_base, 'http://10.20.32.13:9182')
+        self.assertEqual(private_token, 'campus-one-time-token')
         for value in ('http://service.example.test/#enroll=one-time-secret-123',
                       'https://service.example.test/?token=x#enroll=one-time-secret-123'):
             with self.assertRaises(ValueError):

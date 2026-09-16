@@ -256,6 +256,8 @@ def handler_for(panel: ClientPanel):
                     return self.reply(200, panel.state())
                 if self.path == '/api/online/routes':
                     return self.reply(200, {'routes': panel.online.routes()})
+                if self.path == '/api/online/subscription':
+                    return self.reply(200, panel.online.subscription())
                 if self.path == '/api/online/usage':
                     return self.reply(200, panel.online.usage())
             except Exception as exc:
