@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "server-network-assist"
-version = "0.6.0"
+version = "0.7.0"
 description = "Self-hosted SSH inventory, network reachability and reversible WireGuard gateway console"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,6 +39,9 @@ server-network-assist = "server_network_assist.cli:main"
 server-network-assist-ctl = "server_network_assist.control_cli:main"
 server-network-assist-client = "server_network_assist.client:main"
 server-network-assist-client-admin = "server_network_assist.client_admin:main"
+server-network-assist-service-admin = "server_network_assist.client_service_admin:main"
+server-network-assist-relay = "server_network_assist.client_relay:main"
+server-network-assist-relay-agent = "server_network_assist.client_relay_agent:main"
 
 [project.gui-scripts]
 server-network-assist-desktop = "server_network_assist.desktop:main"

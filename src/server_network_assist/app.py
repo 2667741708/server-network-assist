@@ -33,6 +33,8 @@ from .network_assist import (HELPER as NETWORK_HELPER, NetworkStore,
                              helper_command, parse_probe, probe_command,
                              detect_platform, windows_file_command, WINDOWS_HELPER)
 from .auth import hash_password, token_digest, verify_password
+from .client_store import ClientStore
+from .client_service_api import ClientServiceAPI
 
 
 class State:
@@ -92,6 +94,7 @@ class State:
             db.execute("UPDATE codex_sessions SET status='error', last_error='管理台重启，上一条消息已中止' WHERE status='running'")
             db.execute("UPDATE codex_messages SET status='error', content='管理台重启，上一条消息已中止' WHERE status='running'")
         self.network = NetworkStore(self)
+        self.client_service = ClientStore(self.data / 'commercial-service.sqlite3')
 
     @contextlib.contextmanager
     def connect(self):
@@ -792,11 +795,13 @@ PUBLIC = {'/api/session', '/api/login', '/api/passkey/options', '/api/passkey/lo
 
 def create_app(data, key_file):
     state = State(data, key_file)
+    client_api = ClientServiceAPI(state.client_service)
 
     @web.middleware
     async def guard(request, handler):
         try:
-            if request.method == 'POST' or request.path == '/ws':
+            external_client = request.path.startswith('/client/v1/') or request.path.startswith('/relay/v1/')
+            if (request.method == 'POST' or request.path == '/ws') and not external_client:
                 origin = request.headers.get('Origin')
                 if not state.origin_allowed(request) or (request.path == '/ws' and not origin):
                     raise web.HTTPForbidden(text='来源无效')
@@ -839,6 +844,12 @@ def create_app(data, key_file):
             return web.json_response({'credentials': state.credentials()})
         if path == '/api/network':
             return web.json_response({'profiles': state.network.profiles()})
+        if path == '/api/client-service':
+            return web.json_response({'plans': state.client_service.list_plans(),
+                'customers': state.client_service.list_customers(),
+                'devices': state.client_service.list_devices(),
+                'grants': state.client_service.list_grants(),
+                'leases': state.client_service.list_leases()})
         if path == '/api/clash':
             return web.json_response(await clash_remote(
                 state, request.query.get('host_id', ''), {'action': 'status'}))
@@ -1013,6 +1024,25 @@ def create_app(data, key_file):
             profile = state.network.get(str(p.get('id', '')))
             state.network.delete(str(p.get('id', '')))
             state.audit('network_profile_deleted', profile['name'] if profile else str(p.get('id', '')))
+            return web.json_response({'ok': True})
+        if path == '/api/client-service/action':
+            fresh(state, session)
+            action, object_id = str(p.get('action', '')), str(p.get('id', ''))
+            if action == 'customer-enable':
+                state.client_service.set_customer_enabled(object_id, bool(p.get('enabled')))
+            elif action == 'device-enable':
+                state.client_service.set_device_enabled(object_id, bool(p.get('enabled')))
+            elif action == 'grant-enable':
+                state.client_service.set_grant_enabled(object_id, bool(p.get('enabled')))
+            elif action == 'lease-revoke':
+                state.client_service.revoke('lease', object_id)
+            elif action == 'enrollment-token':
+                token = state.client_service.create_enrollment_token(object_id, ttl=int(p.get('ttl', 900)))
+                state.audit('client_enrollment_token_created', object_id)
+                return web.json_response({'token': token})
+            else:
+                raise ValueError('商业服务操作无效')
+            state.audit('client_service_' + action, object_id)
             return web.json_response({'ok': True})
         if path == '/api/host/save':
             return web.json_response({'host': state.save_host(p)})
@@ -1335,6 +1365,10 @@ def create_app(data, key_file):
     app.router.add_get('/ws/browser', browser_websocket)
     app.router.add_get('/api/{tail:.*}', get)
     app.router.add_post('/api/{tail:.*}', post)
+    app.router.add_get('/client/v1/{tail:.*}', client_api.handle_client)
+    app.router.add_post('/client/v1/{tail:.*}', client_api.handle_client)
+    app.router.add_get('/relay/v1/{tail:.*}', client_api.handle_relay)
+    app.router.add_post('/relay/v1/{tail:.*}', client_api.handle_relay)
     app.router.add_get('/', static)
     app.router.add_get('/{name:.*}', static)
     return app

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 - 2026-09-16
+
+- Add a commercial control plane for plans, customer enrollment, device-bound Ed25519 authentication and short leases.
+- Add immediate customer, device, grant and lease revocation with relay desired-state reconciliation.
+- Add trusted WireGuard relay accounting with idempotent cumulative reports and quota enforcement.
+- Add Linux nftables isolation and per-peer `tc` upload/download shaping, plus an HTTPS relay agent and systemd installer.
+- Add a redacting administrator CLI, deployment documentation and end-to-end security tests.
+
 ## 0.6.0 - 2026-09-16
 
 - Add a separate customer-only desktop client with no fleet, SSH, terminal, proxy or campus-account management routes.
