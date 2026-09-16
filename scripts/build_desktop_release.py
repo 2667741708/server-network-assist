@@ -75,6 +75,8 @@ def build(output):
                     dependencies={name: dist.version for name, dist in sorted(deps.items())})
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     shutil.copy2(ROOT / 'scripts/install_desktop.ps1', output / 'install_desktop.ps1')
+    shutil.copy2(ROOT / 'scripts/install_client.ps1', output / 'install_client.ps1')
+    shutil.copy2(ROOT / 'scripts/install_client_linux.py', output / 'install_client_linux.py')
     print(json.dumps(dict(archive=str(archive), **manifest)))
 
 

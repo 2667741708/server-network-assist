@@ -49,7 +49,7 @@ $packages = Join-Path $target 'packages'
 & $python -m zipfile -e $archivePath $packages
 if ($LASTEXITCODE -ne 0) { throw 'Cannot extract application wheel' }
 if ($PackageArchive) {
-    & $python -c 'import sys, server_network_assist.desktop, server_network_assist.app, pystray, PIL; assert server_network_assist.__version__ == sys.argv[1]; print(server_network_assist.__version__)' $Version
+    & $python -c 'import sys, server_network_assist.desktop, server_network_assist.client, server_network_assist.app, pystray, PIL; assert server_network_assist.__version__ == sys.argv[1]; print(server_network_assist.__version__)' $Version
 } else {
     & $python -c 'import sys, server_network_assist.desktop; assert server_network_assist.__version__ == sys.argv[1]; print(server_network_assist.__version__)' $Version
 }

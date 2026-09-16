@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 - 2026-09-16
+
+- Add a separate customer-only desktop client with no fleet, SSH, terminal, proxy or campus-account management routes.
+- Add pinned Ed25519 HTTPS subscriptions with device binding, expiry, schema validation and tamper rejection.
+- Add authorized-line latency probes, local WireGuard connect/disconnect controls, quota and speed display, and direct-network verification after disconnect.
+- Add an offline subscription signing utility, Windows customer-client task/shortcut installer, documentation and focused security tests.
+
 ## 0.4.1 - 2026-09-11
 
 - Allow explicitly configured trusted private-network browser origins alongside the primary HTTPS origin.

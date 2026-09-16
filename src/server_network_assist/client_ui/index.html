@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN" class="ios">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>借网客户端</title><link rel="stylesheet" href="/framework7-bundle.min.css"><link rel="stylesheet" href="/framework7-default-theme.css"><link rel="stylesheet" href="/client.css"><script src="/framework7-bundle.min.js" defer></script><script src="/client.js" defer></script></head>
+<body><div id="app"><div class="view view-main"><div class="page page-current">
+<header class="navbar"><div class="navbar-bg"></div><div class="navbar-inner"><div class="title">借网客户端</div><div class="right"><button id="refresh" class="button">刷新</button></div></div></header>
+<main class="page-content">
+<div id="notice" class="block block-strong inset" role="status" hidden></div>
+<section class="block"><p class="eyebrow">SERVER NETWORK ASSIST CLIENT</p><h1>你的网络线路</h1><p id="identity">正在读取本机状态</p></section>
+<article class="card hero"><div class="card-content card-content-padding"><div class="status-row"><span id="status-dot" class="status-dot"></span><strong id="status-title">等待订阅</strong></div><p id="status-detail">添加管理员提供的签名订阅地址后即可查看获授权线路。</p><div class="metrics"><div><span>可用线路</span><strong id="line-count">—</strong></div><div><span>订阅到期</span><strong id="expires">—</strong></div><div><span>运行平台</span><strong id="platform">—</strong></div></div></div></article>
+<section class="block-title">订阅</section><form id="subscription-form" class="card"><div class="card-content card-content-padding"><label for="subscription-url">配置地址</label><textarea id="subscription-url" rows="3" placeholder="https://example.com/subscription/token#key=签名公钥" required></textarea><p class="help">地址中的签名公钥只用于本机验证；不会发送给订阅服务器。客户端不会接收 SSH、管理面板或服务器控制凭据。</p><div class="action-row"><button class="button button-fill" type="submit">保存地址</button><button id="update" class="button button-outline" type="button">更新订阅</button><button id="remove" class="button button-outline color-red" type="button">移除订阅</button></div><p id="subscription-summary" class="mono wrap"></p></div></form>
+<section class="block-title">获授权线路</section><div id="lines"></div>
+<section class="block-title">安全边界</section><article class="card"><div class="card-content card-content-padding"><ul class="plain-list"><li>只控制订阅列出的本机 WireGuard 隧道。</li><li>借网前检查接入点；退网后检查原网络是否恢复。</li><li>线路限速、流量额度和有效期由服务端执行，客户端数据仅作展示。</li><li>订阅过期、签名错误或线路未安装时拒绝连接。</li></ul></div></article>
+</main></div></div></div></body></html>
