@@ -15,6 +15,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__
+from .client_online import OnlineServiceClient
 from .client_subscription import SubscriptionStore, local_device_id, probe_line
 from .desktop import WINDOWS, change_tunnel, connectivity, local_data_dir, native_status
 
@@ -28,6 +29,7 @@ class ClientPanel:
         self.origin = ''
         self.lock = threading.Lock()
         self.subscription = SubscriptionStore(self.data)
+        self.online = OnlineServiceClient(self.data)
         self.active_path = self.data / 'customer-active-line.json'
 
     def payload(self):
@@ -64,6 +66,14 @@ class ClientPanel:
                 payload = self.subscription.cached(allow_expired=True)
             except ValueError:
                 payload = None
+        online = None
+        if self.online.configured():
+            try:
+                online = self.online.summary()
+                if not self.subscription.configured():
+                    error = None
+            except ValueError as exc:
+                online = {'configured': True, 'error': str(exc)}
         native = native_status()
         tunnels = {row['name']: row for row in native.get('tunnels', [])}
         lines = []
@@ -79,7 +89,7 @@ class ClientPanel:
                 'hostname': socket.gethostname(), 'elevated': native.get('elevated', False),
                 'subscription': subscription, 'customer': payload.get('customer') if payload else None,
                 'subscription_expires_at': payload.get('expires_at') if payload else None,
-                'lines': lines, 'error': error, 'timestamp': int(time.time())}
+                'lines': lines, 'online_service': online, 'error': error, 'timestamp': int(time.time())}
 
     def _line(self, line_id):
         return next((row for row in self.payload()['lines'] if row['id'] == line_id), None)
@@ -244,6 +254,10 @@ def handler_for(panel: ClientPanel):
                     return self.reply(200, {'app': 'server-network-assist-client', 'version': __version__})
                 if self.path == '/api/state':
                     return self.reply(200, panel.state())
+                if self.path == '/api/online/routes':
+                    return self.reply(200, {'routes': panel.online.routes()})
+                if self.path == '/api/online/usage':
+                    return self.reply(200, panel.online.usage())
             except Exception as exc:
                 return self.reply(400, {'error': str(exc)[:500]})
             self.reply(404, {'error': 'Not found'})
@@ -252,7 +266,9 @@ def handler_for(panel: ClientPanel):
             if not self.authorized() or self.headers.get('Origin') != panel.origin:
                 return self.reply(403, {'error': '请求来源或令牌无效'})
             if self.path not in ('/api/subscription', '/api/subscription/update', '/api/subscription/remove',
-                                 '/api/line/probe', '/api/line/connect', '/api/line/disconnect'):
+                                 '/api/line/probe', '/api/line/connect', '/api/line/disconnect',
+                                 '/api/online/enroll', '/api/online/lease', '/api/online/lease/renew',
+                                 '/api/online/lease/release', '/api/online/remove'):
                 return self.reply(404, {'error': 'Not found'})
             try:
                 size = int(self.headers.get('Content-Length', 0))
@@ -262,7 +278,21 @@ def handler_for(panel: ClientPanel):
                 if not isinstance(value, dict):
                     raise ValueError('请求必须为 JSON 对象')
                 with panel.lock:
-                    if self.path == '/api/subscription':
+                    if self.path == '/api/online/enroll':
+                        result = panel.online.enroll(str(value.get('url', '')), str(value.get('label', '')))
+                        result = {'ok': True, **result}
+                    elif self.path == '/api/online/lease':
+                        result = {'ok': True, 'lease': panel.online.lease(str(value.get('grant_id', '')))}
+                    elif self.path == '/api/online/lease/renew':
+                        result = {'ok': True, 'lease': panel.online.renew(value.get('lease_id'))}
+                    elif self.path == '/api/online/lease/release':
+                        panel.online.release(value.get('lease_id'))
+                        result = {'ok': True}
+                    elif self.path == '/api/online/remove':
+                        panel.online.release()
+                        panel.online.remove()
+                        result = {'ok': True}
+                    elif self.path == '/api/subscription':
                         payload = panel.replace_subscription(str(value.get('url', '')))
                         result = {'ok': True, 'expires_at': payload['expires_at']}
                     elif self.path == '/api/subscription/update':
