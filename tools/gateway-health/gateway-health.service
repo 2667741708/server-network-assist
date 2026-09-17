@@ -1,0 +1,10 @@
+[Unit]
+Description=4090 campus login, WireGuard and shared egress recovery
+After=NetworkManager.service network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/gateway-health repair
+TimeoutStartSec=180
+KillMode=control-group
+UMask=0077
