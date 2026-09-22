@@ -42,10 +42,14 @@ class DesktopTests(unittest.TestCase):
             self.assertIn('服务器网络助手', body)
             self.assertNotIn(self.panel.token, body)
             self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
-        for asset in ('/framework7-bundle.min.css', '/framework7-default-theme.css', '/THIRD_PARTY.md', '/FRAMEWORK7-LICENSE.txt'):
+        for asset in ('/desktop.js', '/desktop.css', '/icon.svg'):
             with self.request(asset, token=False) as response:
                 self.assertEqual(response.status, 200)
                 self.assertGreater(len(response.read()), 50)
+        for asset in ('/framework7-bundle.min.css', '/framework7-default-theme.css', '/THIRD_PARTY.md', '/FRAMEWORK7-LICENSE.txt'):
+            with self.assertRaises(HTTPError) as result:
+                self.request(asset)
+            self.assertEqual(result.exception.code, 404)
 
     def test_api_requires_token(self):
         with self.assertRaises(HTTPError) as result:

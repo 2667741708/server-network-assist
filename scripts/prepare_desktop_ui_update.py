@@ -1,4 +1,4 @@
-"""Stage only the reviewed desktop view and asset routes, never network settings."""
+"""Stage only the reviewed React desktop view and asset routes, never network settings."""
 import hashlib
 import json
 from pathlib import Path
@@ -7,9 +7,7 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'artifacts/desktop-ui-update'
 OUT.mkdir(parents=True, exist_ok=True)
-files = ['desktop.py'] + ['desktop_ui/' + name for name in (
-    'index.html','desktop.js','desktop.css','framework7-bundle.min.css',
-    'framework7-default-theme.css','FRAMEWORK7-LICENSE.txt','framework7-provenance.json','THIRD_PARTY.md')]
+files = ['desktop.py'] + ['desktop_ui/' + name for name in ('index.html', 'desktop.js', 'desktop.css')]
 manifest = []
 for name in files:
     source = ROOT / 'src/server_network_assist' / name

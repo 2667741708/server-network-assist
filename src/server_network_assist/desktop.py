@@ -194,7 +194,10 @@ def handler_for(panel: Panel):
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+            # Fluent UI React injects its deterministic local Griffel styles at runtime.
+            # Keep scripts, images, fonts, framing, and network origins locked down;
+            # permit only local runtime style injection required by the desktop shell.
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
             with contextlib.suppress(BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 self.end_headers()
                 self.wfile.write(body)
@@ -207,11 +210,6 @@ def handler_for(panel: Panel):
         def do_GET(self):
             assets = {'/': ('index.html', 'text/html; charset=utf-8'),
                       '/desktop.css': ('desktop.css', 'text/css'),
-                      '/framework7-bundle.min.css': ('framework7-bundle.min.css', 'text/css'),
-                      '/framework7-bundle.min.js': ('framework7-bundle.min.js', 'text/javascript'),
-                      '/framework7-default-theme.css': ('framework7-default-theme.css', 'text/css'),
-                      '/THIRD_PARTY.md': ('THIRD_PARTY.md', 'text/plain; charset=utf-8'),
-                      '/FRAMEWORK7-LICENSE.txt': ('FRAMEWORK7-LICENSE.txt', 'text/plain; charset=utf-8'),
                       '/desktop.js': ('desktop.js', 'text/javascript'),
                       '/icon.svg': ('icon.svg', 'image/svg+xml')}
             if self.path in assets:

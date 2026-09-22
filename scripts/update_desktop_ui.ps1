@@ -13,7 +13,7 @@ $installRoot = 'C:\ProgramData\ServerNetworkAssist\desktop\0.2.0'
 $packageRoot = Join-Path $installRoot 'packages\server_network_assist'
 if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'desktop.py'))) { throw 'Expected desktop installation not found' }
 $manifest = Get-Content -LiteralPath (Join-Path $sourceRoot 'manifest.json') -Raw | ConvertFrom-Json
-$allowed = @('desktop.py','desktop_ui/index.html','desktop_ui/desktop.js','desktop_ui/desktop.css','desktop_ui/framework7-bundle.min.css','desktop_ui/framework7-default-theme.css','desktop_ui/FRAMEWORK7-LICENSE.txt','desktop_ui/framework7-provenance.json','desktop_ui/THIRD_PARTY.md')
+$allowed = @('desktop.py','desktop_ui/index.html','desktop_ui/desktop.js','desktop_ui/desktop.css')
 if ($manifest.files.Count -ne $allowed.Count) { throw 'Unexpected update file count' }
 foreach ($file in $manifest.files) {
     if ($file.path -notin $allowed) { throw 'Unexpected update path' }
@@ -56,7 +56,7 @@ function Test-Panel {
             $headers = @{ 'X-Desktop-Token' = $state.token }
             $health = Invoke-RestMethod -Uri ($baseUrl + '/api/health') -Headers $headers -TimeoutSec 2
             if ($health.app -ne 'server-network-assist-desktop') { throw 'Wrong application' }
-            $css = Invoke-WebRequest -Uri ($baseUrl + '/framework7-default-theme.css') -UseBasicParsing -TimeoutSec 2
+            $css = Invoke-WebRequest -Uri ($baseUrl + '/desktop.css') -UseBasicParsing -TimeoutSec 2
             if ($css.StatusCode -ne 200) { throw 'New UI stylesheet not served' }
             return
         } catch { Start-Sleep -Milliseconds 250 }
