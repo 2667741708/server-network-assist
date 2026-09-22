@@ -1,45 +1,181 @@
 <!doctype html>
 <html lang="zh-CN" class="ios">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务器网络助手</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/framework7-bundle.min.css"><link rel="stylesheet" href="/framework7-default-theme.css"><link rel="stylesheet" href="/desktop.css"><script src="/framework7-bundle.min.js" defer></script><script src="/desktop.js" defer></script></head>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>服务器网络助手</title>
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/framework7-bundle.min.css">
+  <link rel="stylesheet" href="/framework7-default-theme.css">
+  <link rel="stylesheet" href="/desktop.css">
+  <script src="/framework7-bundle.min.js" defer></script>
+  <script src="/desktop.js" defer></script>
+</head>
 <body>
-<!-- Official Framework7 iOS Panel, Menu List, Tabs, Cards, Forms and Area Chart. MIT; see THIRD_PARTY.md. -->
-<div id="app">
-<aside class="panel panel-left panel-cover" id="navigation" aria-label="功能导航"><div class="page"><div class="page-content">
-<div class="block"><h2>网络助手</h2><p id="hostname">正在识别本机</p><p><span id="platform"></span> · <span id="version"></span></p></div>
-<nav class="list menu-list inset"><ul>
-<li><a href="#overview" class="item-link item-content item-selected" aria-current="page" data-section="overview"><div class="item-inner"><div class="item-title">连接概览</div></div></a></li>
-<li><a href="#tunnel-page" class="item-link item-content" data-section="tunnel-page"><div class="item-inner"><div class="item-title">本机隧道</div></div></a></li>
-<li><a href="#sharing" class="item-link item-content" data-section="sharing"><div class="item-inner"><div class="item-title">共享网络</div></div></a></li>
-<li><a href="#hosts-page" class="item-link item-content" data-section="hosts-page"><div class="item-inner"><div class="item-title">主机与凭据</div></div></a></li>
-<li><a href="#proxy-page" class="item-link item-content" data-section="proxy-page"><div class="item-inner"><div class="item-title">系统代理</div></div></a></li>
-<li><a href="#diagnostics" class="item-link item-content" data-section="diagnostics"><div class="item-inner"><div class="item-title">诊断与恢复</div></div></a></li>
-<li><a href="#settings" class="item-link item-content" data-section="settings"><div class="item-inner"><div class="item-title">后台与更新</div></div></a></li>
-</ul></nav><div class="block"><button id="theme" class="button button-outline" aria-label="切换深浅主题">切换外观</button><p id="permission"></p><p>仅监听本机回环地址</p></div>
-</div></div></aside>
-<div class="view view-main"><div class="page page-current">
-<header class="navbar"><div class="navbar-bg"></div><nav class="navbar-inner" aria-label="面板操作"><div class="left"><button id="menu" class="button" aria-label="打开功能导航">菜单</button></div><div id="page-title" class="title">连接概览</div><div class="right"><button id="refresh" class="button">刷新状态</button></div></nav></header>
-<main class="page-content"><div id="notice" class="block block-strong inset" role="status" hidden></div><div class="tabs">
-<section id="overview" class="tab tab-active" aria-label="连接概览">
-<div class="block"><h1>连接概览</h1><p id="updated">等待首次检测</p></div>
-<article class="hero card"><div class="card-content card-content-padding"><p><span id="network-dot" class="badge" aria-hidden="true">●</span> <span id="network-label">正在检测网络</span></p><h2 id="network-title">连接状态检查中…</h2><p id="network-description">分别检测本机直连和系统应用的网络路径。</p></div></article>
-<div class="list list-strong list-dividers inset"><ul>
-<li class="item-content"><div class="item-inner"><div class="item-title">直连公网<div class="item-footer" id="latency">检查真实 HTTPS 请求</div></div><div class="item-after" id="direct">检测中</div></div></li>
-<li class="item-content"><div class="item-inner"><div class="item-title">系统应用联网<div class="item-footer">使用当前用户的代理设置</div></div><div class="item-after" id="system">检测中</div></div></li>
-<li class="item-content"><div class="item-inner"><div class="item-title">隧道总流量<div class="item-footer" id="traffic-detail">当前会话累计流量</div></div><div class="item-after" id="traffic">—</div></div></li>
-</ul></div>
-<article class="card"><div class="card-header">实时隧道速率</div><div class="card-content card-content-padding"><p id="traffic-rate">等待有效采样</p><p id="traffic-scope">从 WireGuard 计数器计算，非整机网卡流量；每 5 秒刷新。</p><div id="traffic-chart" aria-label="上传下载速率历史图"></div><details><summary>查看完整采样数据</summary><div class="table-scroll"><table><thead><tr><th>时间</th><th>下载</th><th>上传</th></tr></thead><tbody id="traffic-history"></tbody></table></div></details></div></article>
-<article class="card"><div class="card-header">本机出口</div><div class="card-content card-content-padding"><div id="routes" class="route-list">正在读取路由…</div></div></article>
-</section>
-<section id="tunnel-page" class="tab" aria-label="本机隧道"><div class="block"><h1>本机隧道</h1><p>查看本机已安装的 WireGuard 连接。新建多机连接请使用“共享网络”。</p><p>停止借网会备份并禁用该服务的自动启动；只处理该隧道拥有的路由。原脚本额外路由、代理和自动登录任务需单独检查。</p><p id="tunnel-count">读取中</p></div><div id="tunnels" aria-live="polite"></div>
-<form id="campus-form" class="card"><div class="card-header"><h2>恢复物理网络后登录校园网</h2></div><div class="card-content card-content-padding"><p id="campus-state">通过本机安装的 Ysunetlogin_openwrt/netlogin.py 登录。</p><p>先停止本机借网、核对原网关，并在“系统代理”关闭代理或恢复正确备份。此操作不会下线其他账号。</p><div id="campus-fields"></div><label><input type="checkbox" id="campus-physical" required> 我已核对当前出口是本机物理网络，且没有其他 VPN、透明代理或共享网关接管</label><div class="action-row"><button type="button" id="campus-check" class="button button-outline">检查脚本是否安装</button><button type="submit" class="button button-fill">使用此账号登录校园网</button></div><p>密码仅在本次请求中经标准输入传给脚本，不保存到配置、日志或命令行。认证后请核对校园网当前账号；“已在线”不代表已经切换账号。</p></div></form></section>
-<section id="sharing" class="tab" aria-label="共享网络"><div class="block"><h1>共享网络</h1><p>Windows 和 Ubuntu 均可作为出口机或客户端。先添加主机并核对 SSH 指纹，再保存方案、安装辅助程序、探测和启用。</p><div class="action-row"><button class="button button-fill" id="new-profile">新建共享方案</button><button class="button button-outline" id="probe-all">探测全部主机</button></div></div><div id="probe-results"></div><div id="profiles" class="list media-list list-strong inset"><ul></ul></div>
-<form id="profile-form" class="card"><div class="card-header"><h2 id="profile-title">新建共享方案</h2></div><div class="card-content card-content-padding"><div id="profile-fields"></div><p id="selected-hosts"></p><p id="share-explanation"></p><p id="profile-state" role="status"></p><div class="action-row"><button type="submit" class="button button-fill" id="save-profile">保存方案</button><button type="button" class="button button-outline" id="install-helper">安装辅助程序</button><button type="button" class="button button-fill" id="enable-profile">启用共享</button><button type="button" class="button button-outline color-red" id="disable-profile">断开并恢复原网络</button><button type="button" class="button color-red" id="delete-profile">删除方案</button></div></div></form></section>
-<section id="hosts-page" class="tab" aria-label="主机与凭据"><div class="block"><h1>主机与凭据</h1><p>凭据保存在当前桌面实例的加密库中。密码和私钥不会显示在主机清单里。</p><button id="new-host" class="button button-fill">添加主机</button></div><div id="hosts" class="list media-list list-strong inset"><ul></ul></div>
-<form id="host-form" class="card"><div class="card-header"><h2 id="host-title">添加主机</h2></div><div class="card-content card-content-padding"><div id="host-fields"></div><p id="fingerprint" class="mono"></p><label><input id="fingerprint-confirmed" type="checkbox"> 我已通过可信渠道核对上面的 SSH 指纹 / 公钥</label><p>首次保存可暂不填写公钥。读取指纹后核对并再次保存，才会用于后续连接。</p><div class="action-row"><button type="submit" class="button button-fill">保存主机</button><button type="button" class="button button-outline" id="inspect-host">读取指纹</button><button type="button" class="button button-outline" id="test-host">测试连接</button><button type="button" class="button color-red" id="delete-host">删除主机</button></div></div></form>
-<form id="credential-form" class="card"><div class="card-header"><h2>添加加密凭据</h2></div><div class="card-content card-content-padding"><div id="credential-fields"></div><button class="button button-fill" type="submit">保存凭据</button></div></form><div id="credentials" class="list list-strong inset"><ul></ul></div></section>
-<section id="proxy-page" class="tab" aria-label="系统代理"><div class="block"><h1>系统代理</h1><p id="proxy-description">正在读取当前用户的代理配置。</p><p><span id="proxy-state" class="badge">—</span></p><p id="proxy-address" class="mono"></p><button id="load-proxy" class="button button-outline">重新读取代理和备份</button></div><form id="proxy-form" class="card"><div class="card-content card-content-padding"><div id="proxy-fields"></div><div class="action-row"><button id="save-proxy" class="button button-fill" type="submit">备份并保存代理</button><button id="disable-proxy" type="button" class="button button-outline">备份并关闭手动代理</button></div></div></form><div class="block"><h2>代理配置备份</h2><p>每次修改前保存原配置；恢复本身也会先备份当前配置。</p></div><div id="proxy-backups" class="list media-list list-strong inset"><ul></ul></div></section>
-<section id="diagnostics" class="tab" aria-label="诊断与恢复"><div class="block"><h1>诊断与恢复</h1><p>诊断会读取状态；恢复网络需要明确执行断开或代理恢复操作。</p><div class="action-row"><button id="run-diagnostics" class="button button-fill">运行诊断</button><button id="export-diagnostics" class="button button-outline" disabled>导出诊断记录</button></div></div><div id="guidance"></div><div class="block"><h2>本机操作记录</h2><p>日志读取或记录失败不会阻止网络操作。</p></div><div id="diagnostic-events" class="list media-list list-strong inset"><ul></ul></div><div class="block"><h2>多机操作审计</h2></div><div id="fleet-events" class="list media-list list-strong inset"><ul></ul></div><article class="card"><div class="card-content card-content-padding"><h2>恢复入口</h2><div class="action-row"><button class="button button-outline" data-go="sharing">恢复共享方案的原网络</button><button class="button button-outline" data-go="proxy-page">恢复代理备份</button><button class="button button-outline" data-go="tunnel-page">检查本机隧道</button></div><details><summary>无法联网时的检查顺序</summary><ol><li>检查网卡、出口机和 SSH 连通性。</li><li>直连成功而应用失败时，先检查系统代理与 PAC。</li><li>共享方案异常时，查看错误并执行“断开并恢复原网络”。若恢复未完成，保留方案并重试恢复。</li><li>恢复后重新探测公网和系统应用，不要仅凭隧道显示“已连接”判断成功。</li></ol></details></div></article></section>
-<section id="settings" class="tab" aria-label="后台与更新"><div class="block"><h1>后台与更新</h1></div><article class="card"><div class="card-header">后台状态</div><div class="card-content card-content-padding"><p id="background-state">正在读取后台能力。</p><p>关闭面板页面后，后台服务与网络连接继续运行。通过桌面快捷方式或系统托盘重新打开面板。</p><p id="tray-state"></p></div></article><article class="card"><div class="card-header">程序更新</div><div class="card-content card-content-padding"><button id="check-updates" class="button button-fill">检查 GitHub 更新</button><p id="update-state">尚未检查版本。</p><div id="update-links" class="action-row"></div><p>更新入口提供官方发布说明与下载。安装更新前保留配置备份，完成安装后重新打开面板检查状态。</p></div></article><div class="block"><p>界面：Framework7 9.1.3 官方 iOS 组件 · <a href="/THIRD_PARTY.md" target="_blank" rel="noopener">组件来源与授权</a></p></div></section>
-</div></main></div></div></div>
-<dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text"><div class="dialog-inner"><h2 id="confirm-title" class="dialog-title">确认操作</h2><p id="confirm-text" class="dialog-text"></p></div><div class="dialog-buttons"><button id="cancel" class="dialog-button">取消</button><button id="accept" class="dialog-button dialog-button-bold">确认</button></div></dialog>
-</body></html>
+<div id="app" class="network-app">
+  <aside class="panel panel-left panel-cover" id="navigation" aria-label="功能导航">
+    <div class="page">
+      <div class="page-content sidebar-content">
+        <div class="sidebar-brand">
+          <div class="brand-mark" aria-hidden="true">SN</div>
+          <div>
+            <p class="eyebrow">NETWORK OPERATIONS</p>
+            <h1>网络助手</h1>
+            <p id="hostname" class="sidebar-hostname">正在识别本机</p>
+          </div>
+        </div>
+        <div class="sidebar-version"><span id="platform">—</span><span aria-hidden="true">·</span><span id="version">—</span></div>
+
+        <nav class="list menu-list" aria-label="网络运维功能">
+          <ul>
+            <li><a href="#overview" class="item-link item-content item-selected" aria-current="page" data-section="overview"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">连接概览</div><div class="item-after nav-shortcut">01</div></div></a></li>
+            <li><a href="#tunnel-page" class="item-link item-content" data-section="tunnel-page"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">本机隧道</div><div class="item-after nav-shortcut">02</div></div></a></li>
+            <li><a href="#sharing" class="item-link item-content" data-section="sharing"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">共享网络</div><div class="item-after nav-shortcut">03</div></div></a></li>
+            <li><a href="#hosts-page" class="item-link item-content" data-section="hosts-page"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">主机与凭据</div><div class="item-after nav-shortcut">04</div></div></a></li>
+            <li><a href="#proxy-page" class="item-link item-content" data-section="proxy-page"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">系统代理</div><div class="item-after nav-shortcut">05</div></div></a></li>
+            <li><a href="#diagnostics" class="item-link item-content" data-section="diagnostics"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">诊断与恢复</div><div class="item-after nav-shortcut">06</div></div></a></li>
+            <li><a href="#settings" class="item-link item-content" data-section="settings"><span class="nav-indicator" aria-hidden="true"></span><div class="item-inner"><div class="item-title">后台与更新</div><div class="item-after nav-shortcut">07</div></div></a></li>
+          </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-service-state">
+            <span id="sidebar-status-dot" class="status-dot status-info" aria-hidden="true"></span>
+            <div><span>后台服务</span><strong id="sidebar-status">读取中</strong></div>
+          </div>
+          <button id="theme" class="button button-outline sidebar-theme" type="button" aria-label="切换深浅主题">切换外观</button>
+          <p id="permission" class="sidebar-permission">等待本机权限状态</p>
+          <p class="loopback-note">仅监听本机回环地址</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="view view-main">
+    <div class="page page-current">
+      <header class="navbar app-navbar">
+        <div class="navbar-bg"></div>
+        <nav class="navbar-inner" aria-label="面板操作">
+          <div class="left"><button id="menu" class="button menu-button" type="button" aria-label="打开功能导航">菜单</button></div>
+          <div class="title header-title"><span class="eyebrow">SERVER NETWORK ASSIST</span><span id="page-title">连接概览</span></div>
+          <div class="right header-actions"><span id="header-hostname" class="header-hostname">—</span><button id="refresh" class="button button-fill" type="button">刷新状态</button></div>
+        </nav>
+      </header>
+
+      <main class="page-content">
+        <div id="notice" class="notice-banner" role="status" aria-live="polite" hidden></div>
+        <div class="tabs">
+          <section id="overview" class="tab tab-active" aria-label="连接概览">
+            <div class="page-header">
+              <div><p class="eyebrow">01 / OVERVIEW</p><h1>连接概览</h1><p class="page-lede">先看本机现在是否可用，再定位问题是在直连、系统代理、隧道还是远端。</p></div>
+              <div class="page-header-meta"><span class="meta-label">最近检测</span><strong id="updated">等待首次检测</strong></div>
+            </div>
+
+            <article id="network-summary" class="status-hero surface-section">
+              <div class="status-hero-main">
+                <div class="status-kicker"><span id="network-dot" class="status-dot status-info" aria-hidden="true"></span><span id="network-label">正在检测网络</span></div>
+                <h2 id="network-title">连接状态检查中…</h2>
+                <p id="network-description">分别检测本机直连和系统应用的网络路径。</p>
+              </div>
+              <dl class="status-hero-meta">
+                <div><dt>本机</dt><dd id="hero-hostname">—</dd></div>
+                <div><dt>平台</dt><dd id="hero-platform">—</dd></div>
+                <div><dt>权限</dt><dd id="hero-permission">—</dd></div>
+              </dl>
+            </article>
+
+            <div class="metric-grid" aria-label="核心状态">
+              <article class="metric-tile surface-section"><div class="metric-heading"><span class="metric-index">A</span><span>直连公网</span></div><strong id="direct" class="metric-value status-text-info">检测中</strong><span id="latency" class="metric-detail">检查真实 HTTPS 请求</span></article>
+              <article class="metric-tile surface-section"><div class="metric-heading"><span class="metric-index">B</span><span>系统应用联网</span></div><strong id="system" class="metric-value status-text-info">检测中</strong><span id="system-detail" class="metric-detail">使用当前用户的代理设置</span></article>
+              <article class="metric-tile surface-section"><div class="metric-heading"><span class="metric-index">C</span><span>隧道总流量</span></div><strong id="traffic" class="metric-value">—</strong><span id="traffic-detail" class="metric-detail">当前会话累计流量</span></article>
+            </div>
+
+            <div class="content-grid overview-grid">
+              <article class="surface-section traffic-panel">
+                <div class="section-heading"><div><p class="eyebrow">TELEMETRY</p><h2>实时隧道速率</h2></div><span class="quiet-label">每 5 秒刷新</span></div>
+                <p id="traffic-rate" class="traffic-rate">等待有效采样</p>
+                <p id="traffic-scope" class="section-note">仅为 WireGuard 隧道流量，不是整机网卡流量。</p>
+                <div id="traffic-chart" class="traffic-chart" aria-label="WireGuard 隧道上传下载速率历史图"></div>
+                <details class="details-block"><summary>查看完整采样数据</summary><div class="table-scroll"><table><thead><tr><th>时间</th><th>下载</th><th>上传</th></tr></thead><tbody id="traffic-history"></tbody></table></div></details>
+              </article>
+              <article class="surface-section route-panel">
+                <div class="section-heading"><div><p class="eyebrow">LOCAL EGRESS</p><h2>本机出口</h2></div><span class="quiet-label">只读</span></div>
+                <p class="section-note">当前默认路由、物理网卡和网关来自本机状态探测。</p>
+                <div id="routes" class="route-list" aria-live="polite">正在读取路由…</div>
+                <div class="route-proxy-note"><span>代理状态</span><strong id="overview-proxy-state">随系统代理页读取</strong></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="tunnel-page" class="tab" aria-label="本机隧道">
+            <div class="page-header"><div><p class="eyebrow">02 / LOCAL TUNNELS</p><h1>本机隧道</h1><p class="page-lede">每个 WireGuard tunnel 都显示握手、计数器和真实本地出口。危险的停借网操作单独放在恢复区。</p></div><div class="page-header-meta"><span class="meta-label">活动隧道</span><strong id="tunnel-count">读取中</strong></div></div>
+            <div class="callout callout-info"><strong>先恢复物理网络，再登录校园网。</strong><span>停止借网会处理该隧道拥有的路由；旧脚本额外路由、代理和自动登录任务需要单独核对。</span></div>
+            <div id="tunnels" class="stacked-cards" aria-live="polite"></div>
+            <form id="campus-form" class="surface-section campus-panel">
+              <div class="section-heading"><div><p class="eyebrow">CAMPUS LOGIN</p><h2>恢复物理网络后登录校园网</h2></div><span class="warning-chip">需要确认物理出口</span></div>
+              <p id="campus-state" class="section-note">通过本机安装的 Ysunetlogin_openwrt/netlogin.py 登录。</p>
+              <p class="warning-note">先停止本机借网、核对原网关，并在“系统代理”关闭代理或恢复正确备份。此操作不会下线其他账号。</p>
+              <div id="campus-fields"></div>
+              <label class="confirm-line"><input type="checkbox" id="campus-physical" required> <span>我已核对当前出口是本机物理网络，且没有其他 VPN、透明代理或共享网关接管</span></label>
+              <div class="action-row"><button type="button" id="campus-check" class="button button-outline">检查脚本是否安装</button><button type="submit" class="button button-fill">使用此账号登录校园网</button></div>
+              <p class="field-help">密码仅在本次请求中经标准输入传给脚本，不保存到配置、日志或命令行。“已在线”不代表已经切换账号。</p>
+            </form>
+          </section>
+
+          <section id="sharing" class="tab" aria-label="共享网络">
+            <div class="page-header"><div><p class="eyebrow">03 / SHARED NETWORK</p><h1>共享网络</h1><p class="page-lede">先确认出口机与客户端，再查看路径、探测结果和恢复边界。启用 WireGuard 不等于公网一定可用。</p></div><div class="page-header-actions"><button class="button button-fill" id="new-profile" type="button">新建共享方案</button><button class="button button-outline" id="probe-all" type="button">探测全部主机</button></div></div>
+            <div class="callout callout-warning"><strong>启用前看清路径。</strong><span>物理出口方案：Client → WireGuard → Source Host → Internet；源代理方案：Client → WireGuard → Source Proxy。每次启用都会经过后端连通性检查和可回退流程。</span></div>
+            <div id="probe-results" class="probe-grid"></div>
+            <div class="sharing-layout">
+              <aside class="profile-list-pane surface-section" aria-label="共享方案列表"><div class="section-heading"><div><p class="eyebrow">PROFILES</p><h2>方案列表</h2></div><span id="profile-count" class="quiet-label">0 个</span></div><div id="profiles" class="profile-list"></div></aside>
+              <section class="profile-detail-pane" aria-label="共享方案详情">
+                <form id="profile-form" class="surface-section">
+                  <div class="section-heading"><div><p class="eyebrow">PROFILE DETAIL</p><h2 id="profile-title">新建共享方案</h2></div><span id="profile-state" class="status-badge status-info">尚未保存</span></div>
+                  <p id="selected-hosts" class="selection-summary">请选择出口机和客户端。</p>
+                  <div id="profile-path" class="path-diagram" aria-live="polite"></div>
+                  <p id="share-explanation" class="section-note"></p>
+                  <div id="profile-fields"></div>
+                  <p class="field-help">保留路由只影响明确列出的 CIDR。源代理开关只转发源 HTTP / 混合代理，不会把系统 VPN / TUN 自动复制到客户端。</p>
+                  <div class="action-row profile-actions"><button type="submit" class="button button-fill" id="save-profile">保存方案</button><button type="button" class="button button-outline" id="install-helper">安装辅助程序</button><button type="button" class="button button-fill" id="enable-profile">启用共享</button><button type="button" class="button button-outline color-red" id="disable-profile">断开并恢复原网络</button><button type="button" class="button color-red" id="delete-profile">删除方案</button></div>
+                </form>
+              </section>
+            </div>
+          </section>
+
+          <section id="hosts-page" class="tab" aria-label="主机与凭据">
+            <div class="page-header"><div><p class="eyebrow">04 / FLEET ACCESS</p><h1>主机与凭据</h1><p class="page-lede">主机身份和登录秘密分开管理。主机未确认 SSH 指纹时始终显示 Warning，不会用绿色状态掩盖风险。</p></div><div class="page-header-meta"><span class="meta-label">凭据安全</span><strong>仅显示元数据</strong></div></div>
+            <div class="segmented-tabs" role="tablist" aria-label="主机与凭据分区"><button id="hosts-tab" class="segmented-tab is-selected" type="button" role="tab" aria-selected="true" aria-controls="hosts-panel" data-hosts-tab="hosts">Hosts</button><button id="credentials-tab" class="segmented-tab" type="button" role="tab" aria-selected="false" aria-controls="credentials-panel" data-hosts-tab="credentials">Credentials</button></div>
+            <div id="hosts-panel" class="subtab-panel" role="tabpanel" aria-labelledby="hosts-tab"><div class="toolbar-row"><div><h2>主机清单</h2><p class="section-note">地址、跳板、指纹状态和最近测试结果；密码与私钥不会显示。</p></div><button id="new-host" class="button button-fill" type="button">添加主机</button></div><div id="hosts" class="data-table-shell" aria-live="polite"></div></div>
+            <div id="credentials-panel" class="subtab-panel" role="tabpanel" aria-labelledby="credentials-tab" hidden><div class="toolbar-row"><div><h2>凭据清单</h2><p class="section-note">这里只显示名称、类型和关联主机数。保存后输入立即清空，密码和私钥绝不回显。</p></div></div><form id="credential-form" class="surface-section credential-form"><div id="credential-fields"></div><div class="action-row"><button class="button button-fill" type="submit">保存凭据</button></div></form><div id="credentials" class="data-table-shell" aria-live="polite"></div></div>
+            <dialog id="host-drawer" class="drawer-dialog" aria-labelledby="host-title" aria-describedby="host-drawer-note"><form id="host-form"><div class="drawer-header"><div><p class="eyebrow">HOST DETAIL</p><h2 id="host-title">添加主机</h2></div><button id="close-host" class="icon-button" type="button" aria-label="关闭主机编辑">×</button></div><div class="drawer-body"><div id="host-fields"></div><p id="fingerprint" class="fingerprint mono"></p><p id="fingerprint-status" class="fingerprint-status status-badge status-warning">未确认 SSH 指纹</p><label class="confirm-line"><input id="fingerprint-confirmed" type="checkbox"> <span>我已通过可信渠道核对上面的 SSH 指纹 / 公钥</span></label><p id="host-drawer-note" class="field-help">首次保存可暂不填写公钥。读取指纹后核对并再次保存，才会用于后续连接。</p></div><div class="drawer-footer action-row"><button type="submit" class="button button-fill">保存主机</button><button type="button" class="button button-outline" id="inspect-host">读取指纹</button><button type="button" class="button button-outline" id="test-host">测试连接</button><button type="button" class="button color-red" id="delete-host">删除主机</button></div></form></dialog>
+          </section>
+
+          <section id="proxy-page" class="tab" aria-label="系统代理">
+            <div class="page-header"><div><p class="eyebrow">05 / SYSTEM PROXY</p><h1>系统代理</h1><p class="page-lede">只查看和修改当前用户代理范围。所有修改先备份，并在写入后复检。</p></div><button id="load-proxy" class="button button-outline" type="button">重新读取代理和备份</button></div>
+            <article class="proxy-summary surface-section"><div class="section-heading"><div><p class="eyebrow">CURRENT USER</p><h2>当前用户代理状态</h2></div><span id="proxy-state" class="status-badge status-info">读取中</span></div><p id="proxy-description" class="section-note">正在读取当前用户的代理配置。</p><dl class="proxy-facts"><div><dt>手动代理</dt><dd id="proxy-manual-state">—</dd></div><div><dt>PAC</dt><dd id="proxy-pac-state">—</dd></div><div><dt>代理地址</dt><dd id="proxy-address" class="mono">—</dd></div></dl></article>
+            <form id="proxy-form" class="surface-section"><div class="section-heading"><div><p class="eyebrow">CHANGE WITH BACKUP</p><h2>备份并修改</h2></div></div><div id="proxy-fields"></div><p class="warning-note">关闭手动代理不会移除 PAC。PAC、代理软件和其他用户的设置需要单独检查。</p><div class="action-row"><button id="save-proxy" class="button button-fill" type="submit">备份并保存代理</button><button id="disable-proxy" type="button" class="button button-outline">备份并关闭手动代理</button></div></form>
+            <section class="surface-section"><div class="section-heading"><div><p class="eyebrow">RECOVERY HISTORY</p><h2>代理备份历史</h2></div><span class="quiet-label">恢复前会再次备份当前设置</span></div><div id="proxy-backups" class="list media-list compact-list"><ul></ul></div></section>
+          </section>
+
+          <section id="diagnostics" class="tab" aria-label="诊断与恢复">
+            <div class="page-header"><div><p class="eyebrow">06 / DIAGNOSTICS</p><h1>诊断与恢复</h1><p class="page-lede">当前问题来自真实状态探测；建议操作只提供入口，不根据错误文本自动执行危险动作。</p></div><div class="page-header-actions"><button id="run-diagnostics" class="button button-fill" type="button">运行诊断</button><button id="export-diagnostics" class="button button-outline" type="button" disabled>导出诊断记录</button></div></div>
+            <div class="diagnostics-grid"><section class="surface-section"><div class="section-heading"><div><p class="eyebrow">CURRENT ISSUES</p><h2>当前问题</h2></div><span class="quiet-label">状态来自探测</span></div><div id="diagnostic-summary" class="diagnostic-summary"><div class="empty-state">运行诊断后显示公网、代理、隧道、路由、SSH 和共享方案状态。</div></div></section><section class="surface-section"><div class="section-heading"><div><p class="eyebrow">NEXT STEPS</p><h2>建议操作</h2></div></div><div id="guidance" class="guidance-list"></div></section></div>
+            <div class="event-sections"><section class="surface-section"><div class="section-heading"><div><p class="eyebrow">LOCAL EVENTS</p><h2>本机操作记录</h2></div><span class="quiet-label">读取或记录失败不阻止网络操作</span></div><div id="diagnostic-events" class="list media-list compact-list"><ul></ul></div></section><section class="surface-section"><div class="section-heading"><div><p class="eyebrow">FLEET AUDIT</p><h2>Fleet 审计</h2></div></div><div id="fleet-events" class="list media-list compact-list"><ul></ul></div></section></div>
+            <section class="surface-section recovery-panel"><div class="section-heading"><div><p class="eyebrow">RECOVERY ENTRY</p><h2>恢复入口</h2></div><span class="warning-chip">执行前会确认影响范围</span></div><div class="recovery-grid"><button class="recovery-action" type="button" data-go="sharing"><strong>恢复共享网络</strong><span>打开方案详情，确认出口、客户端和回退状态后执行。</span></button><button class="recovery-action" type="button" data-go="proxy-page"><strong>恢复代理</strong><span>打开备份历史，选择兼容备份并确认恢复。</span></button><button class="recovery-action" type="button" data-go="tunnel-page"><strong>检查隧道</strong><span>查看握手、计数器和停止借网恢复入口。</span></button></div><details class="details-block"><summary>无法联网时的检查顺序</summary><ol><li>检查网卡、默认路由和出口机 SSH 连通性。</li><li>直连成功而系统应用失败时，先检查系统代理与 PAC。</li><li>共享方案异常时，查看错误并执行“断开并恢复原网络”；若恢复未完成，保留方案并重试。</li><li>恢复后重新探测公网和系统应用，不要仅凭隧道显示“已连接”判断成功。</li></ol></details></section>
+          </section>
+
+          <section id="settings" class="tab" aria-label="后台与更新">
+            <div class="page-header"><div><p class="eyebrow">07 / RUNTIME</p><h1>后台与更新</h1><p class="page-lede">确认后台是否继续运行、面板监听范围和版本更新来源。</p></div></div>
+            <section class="surface-section runtime-summary"><div class="section-heading"><div><p class="eyebrow">BACKGROUND SERVICE</p><h2>后台服务状态</h2></div><span id="runtime-badge" class="status-badge status-info">读取中</span></div><div class="runtime-grid"><div><dt>后台服务</dt><dd id="background-state">正在读取后台能力。</dd></div><div><dt>当前版本</dt><dd id="settings-version">—</dd></div><div><dt>运行模式</dt><dd>桌面后台 + 本机面板</dd></div><div><dt>数据目录</dt><dd id="data-directory">由本地后台管理；当前 API 未回显路径</dd></div><div><dt>监听范围</dt><dd class="mono">127.0.0.1 / loopback</dd></div><div><dt>系统托盘</dt><dd id="tray-state">—</dd></div></div><p class="section-note">本机桌面面板仅监听本机回环地址，不提供公网管理入口。</p></section>
+            <section class="surface-section update-summary"><div class="section-heading"><div><p class="eyebrow">RELEASE CHECK</p><h2>程序更新</h2></div><button id="check-updates" class="button button-fill" type="button">检查 GitHub 更新</button></div><div class="update-facts"><div><span>当前版本</span><strong id="update-current">尚未检查</strong></div><div><span>最新版本</span><strong id="update-latest">尚未检查</strong></div><div><span>安装策略</span><strong>下载并人工确认安装</strong></div></div><p id="update-state" class="section-note">尚未检查版本。</p><div id="update-links" class="action-row"></div><p class="field-help">更新入口提供官方发布说明与下载。本面板不会自动安装未经确认的新版本；安装前请保留配置备份。</p></section>
+            <p class="footer-note">界面：Framework7 9.1.3 官方 iOS 组件 · <a href="/THIRD_PARTY.md" target="_blank" rel="noopener">组件来源与授权</a></p>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+
+<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text"><div class="dialog-inner"><p class="eyebrow">CONFIRM ACTION</p><h2 id="confirm-title" class="dialog-title">确认操作</h2><p id="confirm-text" class="dialog-text"></p></div><div class="dialog-buttons"><button id="cancel" class="button button-outline" type="button">取消</button><button id="accept" class="button button-fill color-red" type="button">确认</button></div></dialog>
+</body>
+</html>
