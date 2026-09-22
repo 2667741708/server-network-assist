@@ -7,7 +7,7 @@ import { getUpdates } from '../api/updates';
 import { getStatus } from '../api/status';
 import type { DiagnosticResponse, FleetState, ProxyResponse, StatusResponse, UpdateResponse } from '../api/types';
 import { operationsDarkTheme, operationsLightTheme } from '../theme/tokens';
-import type { SectionId, ThemeMode } from './types';
+import type { Confirmation, DataFreshness, RunTask, SectionId, ThemeMode } from './types';
 import { Shell } from './Shell';
 import { OverviewPage } from '../pages/OverviewPage';
 import { TunnelsPage } from '../pages/TunnelsPage';
@@ -16,11 +16,6 @@ import { HostsPage } from '../pages/HostsPage';
 import { ProxyPage } from '../pages/ProxyPage';
 import { DiagnosticsPage } from '../pages/DiagnosticsPage';
 import { SettingsPage } from '../pages/SettingsPage';
-
-interface Confirmation {
-  title: string;
-  body: string;
-}
 
 function initialThemeMode(): ThemeMode {
   try {
@@ -45,35 +40,90 @@ export function App() {
   const [section, setSection] = useState<SectionId>('overview');
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [fleet, setFleet] = useState<FleetState>({hosts: [], credentials: [], profiles: []});
+  const [fleetFreshness, setFleetFreshness] = useState<DataFreshness>('unknown');
   const [proxy, setProxy] = useState<ProxyResponse | null>(null);
+  const [proxyFreshness, setProxyFreshness] = useState<DataFreshness>('unknown');
   const [diagnostics, setDiagnostics] = useState<DiagnosticResponse | null>(null);
   const [updates, setUpdates] = useState<UpdateResponse | null>(null);
+  const [statusFreshness, setStatusFreshness] = useState<DataFreshness>('unknown');
   const [themeMode, setThemeMode] = useState<ThemeMode>(initialThemeMode);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const confirmationResolver = useRef<((value: boolean) => void) | null>(null);
   const busyRef = useRef(false);
+  const statusGenerationRef = useRef(0);
+  const appliedStatusGenerationRef = useRef(0);
+  const statusRequestRef = useRef<{generation: number; promise: Promise<StatusResponse>} | null>(null);
+  const forcedStatusRequestRef = useRef<Promise<StatusResponse> | null>(null);
 
   const notify = useCallback((message: string) => setNotice(message), []);
 
-  const refreshStatus = useCallback(async () => {
-    const result = await getStatus();
-    setStatus(result);
-    return result;
+  const refreshStatus = useCallback((force = false): Promise<StatusResponse> => {
+    const current = statusRequestRef.current;
+    if (!force && current) return current.promise;
+    if (force && forcedStatusRequestRef.current) return forcedStatusRequestRef.current;
+
+    const startRequest = () => {
+      const generation = ++statusGenerationRef.current;
+      const promise = getStatus().then(result => {
+        if (generation >= appliedStatusGenerationRef.current) {
+          appliedStatusGenerationRef.current = generation;
+          setStatus(result);
+          setStatusFreshness('fresh');
+        }
+        return result;
+      }).catch(error => {
+        if (generation >= appliedStatusGenerationRef.current) setStatusFreshness('unknown');
+        throw error;
+      }).finally(() => {
+        if (statusRequestRef.current?.generation === generation) statusRequestRef.current = null;
+      });
+      statusRequestRef.current = {generation, promise};
+      return promise;
+    };
+
+    if (!force) return startRequest();
+    const previous = statusRequestRef.current?.promise;
+    const forced = (async () => {
+      if (previous) await previous.catch(() => undefined);
+      if (statusRequestRef.current && statusRequestRef.current.promise !== previous) {
+        await statusRequestRef.current.promise.catch(() => undefined);
+      }
+      return startRequest();
+    })();
+    forcedStatusRequestRef.current = forced;
+    forced.then(() => {
+      if (forcedStatusRequestRef.current === forced) forcedStatusRequestRef.current = null;
+    }, () => {
+      if (forcedStatusRequestRef.current === forced) forcedStatusRequestRef.current = null;
+    });
+    return forced;
   }, []);
 
   const refreshFleet = useCallback(async () => {
-    const [hosts, credentials, network] = await Promise.all([getHosts(), getCredentials(), getNetwork()]);
-    const result = {hosts: hosts.hosts || [], credentials: credentials.credentials || [], profiles: network.profiles || []};
-    setFleet(result);
-    return result;
+    try {
+      const [hosts, credentials, network] = await Promise.all([getHosts(), getCredentials(), getNetwork()]);
+      const result = {hosts: hosts.hosts || [], credentials: credentials.credentials || [], profiles: network.profiles || []};
+      setFleet(result);
+      setFleetFreshness('fresh');
+      return result;
+    } catch (error) {
+      setFleetFreshness('unknown');
+      throw error;
+    }
   }, []);
 
   const loadProxy = useCallback(async () => {
-    const result = await getProxy();
-    setProxy(result);
-    return result;
+    try {
+      const result = await getProxy();
+      setProxy(result);
+      setProxyFreshness('fresh');
+      return result;
+    } catch (error) {
+      setProxyFreshness('unknown');
+      throw error;
+    }
   }, []);
 
   const loadDiagnostics = useCallback(async () => {
@@ -94,7 +144,7 @@ export function App() {
     resolve?.(answer);
   };
 
-  const runTask = useCallback(async (operation: () => Promise<void>, confirm?: Confirmation): Promise<boolean> => {
+  const runTask: RunTask = useCallback(async (operation, confirm, sync): Promise<boolean> => {
     if (busyRef.current) {
       setNotice('已有操作执行中，请等待结果。');
       return false;
@@ -104,7 +154,21 @@ export function App() {
     try {
       if (confirm && !await askConfirmation(confirm)) return false;
       setNotice('正在执行，请等待结果；远端操作可能需要数分钟。');
-      await operation();
+      let operationError: unknown;
+      try {
+        await operation();
+      } catch (error) {
+        operationError = error;
+        throw error;
+      } finally {
+        if (sync) {
+          try {
+            await sync();
+          } catch (syncError) {
+            if (!operationError) throw syncError;
+          }
+        }
+      }
       return true;
     } catch (error) {
       setNotice(messageFrom(error));
@@ -144,7 +208,7 @@ export function App() {
 
   const refreshCurrent = async () => {
     const success = await runTask(async () => {
-      await refreshStatus();
+      await refreshStatus(true);
       if (section === 'sharing' || section === 'hosts-page' || section === 'diagnostics') await refreshFleet();
       if (section === 'proxy-page') await loadProxy();
       if (section === 'diagnostics') await loadDiagnostics();
@@ -154,11 +218,11 @@ export function App() {
 
   const renderPage = () => {
     if (section === 'overview') return <OverviewPage status={status} onNavigate={setSection} />;
-    if (section === 'tunnel-page') return <TunnelsPage status={status} runTask={runTask} refreshStatus={refreshStatus} notify={notify} />;
-    if (section === 'sharing') return <SharingPage fleet={fleet} refreshFleet={refreshFleet} runTask={runTask} notify={notify} />;
-    if (section === 'hosts-page') return <HostsPage fleet={fleet} refreshFleet={refreshFleet} runTask={runTask} notify={notify} />;
-    if (section === 'proxy-page') return <ProxyPage result={proxy} loadProxy={loadProxy} runTask={runTask} notify={notify} />;
-    if (section === 'diagnostics') return <DiagnosticsPage status={status} fleet={fleet} diagnostics={diagnostics} loadDiagnostics={loadDiagnostics} refreshStatus={refreshStatus} runTask={runTask} notify={notify} />;
+    if (section === 'tunnel-page') return <TunnelsPage status={status} statusFreshness={statusFreshness} runTask={runTask} refreshStatus={refreshStatus} notify={notify} />;
+    if (section === 'sharing') return <SharingPage fleet={fleet} fleetFreshness={fleetFreshness} refreshFleet={refreshFleet} refreshStatus={refreshStatus} runTask={runTask} notify={notify} />;
+    if (section === 'hosts-page') return <HostsPage fleet={fleet} fleetFreshness={fleetFreshness} refreshFleet={refreshFleet} runTask={runTask} notify={notify} />;
+    if (section === 'proxy-page') return <ProxyPage result={proxy} proxyFreshness={proxyFreshness} loadProxy={loadProxy} refreshStatus={refreshStatus} runTask={runTask} notify={notify} />;
+    if (section === 'diagnostics') return <DiagnosticsPage status={status} statusFreshness={statusFreshness} fleet={fleet} fleetFreshness={fleetFreshness} diagnostics={diagnostics} loadDiagnostics={loadDiagnostics} refreshStatus={refreshStatus} refreshFleet={refreshFleet} runTask={runTask} notify={notify} />;
     return <SettingsPage status={status} updates={updates} notify={notify} runTask={runTask} />;
   };
 

@@ -3,26 +3,30 @@ import { Button, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, Dia
 import { Add24Regular, Dismiss24Regular, Key24Regular, Search24Regular, Warning24Regular } from '@fluentui/react-icons';
 import type { CredentialDraft, FleetState, HostDraft } from '../api/types';
 import { deleteCredential, deleteHost, inspectHost, probeHosts, saveCredential, saveHost } from '../api/fleet';
-import { ButtonRow, EmptyState, PageIntro, StatusPill, Surface } from '../app/ui';
+import type { DataFreshness, RunTask } from '../app/types';
+import { emptyHost, hostDraftFrom } from '../app/hostDraft';
+import { probeSummary } from '../app/probes';
+import { ButtonRow, EmptyState, formatTime, PageIntro, StatusPill, Surface } from '../app/ui';
 
 interface HostsPageProps {
   fleet: FleetState;
+  fleetFreshness: DataFreshness;
   refreshFleet: () => Promise<FleetState>;
-  runTask: (operation: () => Promise<void>, confirmation?: {title: string; body: string}) => Promise<boolean>;
+  runTask: RunTask;
   notify: (message: string) => void;
 }
 
-const emptyHost: HostDraft = {id: '', name: '', address: '', username: '', port: 22, credential_id: '', jump_id: '', host_key: '', group: ''};
 const emptyCredential: CredentialDraft = {name: '', kind: 'password', secret: '', passphrase: ''};
 
-function HostDialog({open, draft, credentials, hosts, onClose, onSaved, runTask, notify}: {
+function HostDialog({open, draft, credentials, hosts, onClose, onSaved, onProbe, runTask, notify}: {
   open: boolean;
   draft: HostDraft;
   credentials: FleetState['credentials'];
   hosts: FleetState['hosts'];
   onClose: () => void;
   onSaved: () => Promise<unknown>;
-  runTask: HostsPageProps['runTask'];
+  onProbe: (hostId: string, result: NonNullable<Awaited<ReturnType<typeof probeHosts>>['results']>[number], checkedAt?: number) => void;
+  runTask: RunTask;
   notify: HostsPageProps['notify'];
 }) {
   const [value, setValue] = useState<HostDraft>(draft);
@@ -49,9 +53,8 @@ function HostDialog({open, draft, credentials, hosts, onClose, onSaved, runTask,
     }
     if (!await runTask(async () => {
       await saveHost(value);
-      await onSaved();
       onClose();
-    })) return;
+    }, undefined, onSaved)) return;
     notify('主机已保存。');
   };
 
@@ -77,8 +80,11 @@ function HostDialog({open, draft, credentials, hosts, onClose, onSaved, runTask,
     if (!await runTask(async () => {
       const result = await probeHosts([value.id]);
       const first = result.results?.[0];
-      setProbeMessage(first?.ok === true ? '实际连接探测成功。' : '实际连接探测未通过，请查看结果并核对路径。');
-    })) return;
+      if (first) {
+        onProbe(value.id, first, result.checked_at);
+        setProbeMessage(probeSummary(first));
+      } else setProbeMessage('后端未返回该主机的探测结果。');
+    }, undefined, onSaved)) return;
     notify('主机探测完成。');
   };
 
@@ -167,35 +173,37 @@ function CredentialDialog({open, onClose, onSaved, runTask, notify}: {
   </Dialog>;
 }
 
-export function HostsPage({fleet, refreshFleet, runTask, notify}: HostsPageProps) {
+export function HostsPage({fleet, fleetFreshness, refreshFleet, runTask, notify}: HostsPageProps) {
   const [tab, setTab] = useState<'hosts' | 'credentials'>('hosts');
   const [hostDialogOpen, setHostDialogOpen] = useState(false);
   const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
   const [hostDraft, setHostDraft] = useState<HostDraft>(emptyHost);
+  const [probeCache, setProbeCache] = useState<Record<string, {result: NonNullable<Awaited<ReturnType<typeof probeHosts>>['results']>[number]; checkedAt?: number}>>({});
 
   const credentialUseCount = (id: string) => fleet.hosts.filter(host => host.credential_id === id).length;
   const hostName = (id?: string) => fleet.hosts.find(host => host.id === id)?.name || id || '未选择';
 
   const editHost = (hostId?: string) => {
     const host = fleet.hosts.find(item => item.id === hostId);
-    setHostDraft(host ? {
-      id: host.id, name: host.name, address: host.address, username: host.username, port: host.port,
-      credential_id: host.credential_id, jump_id: host.jump_id || '', host_key: host.host_key || '', group: host.group || '',
-    } : emptyHost);
+    setHostDraft(hostDraftFrom(host));
     setHostDialogOpen(true);
   };
 
   const removeHost = (id: string, name: string) => void runTask(async () => {
     await deleteHost(id);
-    await refreshFleet();
     notify('主机已删除。');
-  }, {title: '删除主机？', body: `将删除 ${name}。若仍被跳板或共享方案引用，后台会拒绝。`});
+  }, {title: '删除主机？', body: `将删除 ${name}。若仍被跳板或共享方案引用，后台会拒绝。`}, refreshFleet);
 
   const removeCredential = (id: string, name: string) => void runTask(async () => {
     await deleteCredential(id);
-    await refreshFleet();
     notify('凭据已删除。');
-  }, {title: '删除凭据？', body: `将删除 ${name}。仍被主机使用时后台会拒绝。`});
+  }, {title: '删除凭据？', body: `将删除 ${name}。仍被主机使用时后台会拒绝。`}, refreshFleet);
+
+  const probeLevel = (result: NonNullable<Awaited<ReturnType<typeof probeHosts>>['results']>[number]) => {
+    if (result.ssh === true && result.dns === true && !result.error) return 'ok' as const;
+    if (result.ssh === false || result.error) return 'danger' as const;
+    return 'warning' as const;
+  };
 
   return <>
     <PageIntro title="主机与凭据" description="主机身份和登录凭据分开管理。表格只展示可用于运维判断的元数据，绝不重新显示密码、私钥或私钥口令。" />
@@ -205,7 +213,7 @@ export function HostsPage({fleet, refreshFleet, runTask, notify}: HostsPageProps
         <Tab id="credentials-tab" value="credentials">Credentials · {fleet.credentials.length}</Tab>
       </TabList>
     </Surface>
-    {tab === 'hosts' ? <Surface title="Hosts" description="SSH 指纹未确认时使用 Warning 状态，不能被绿色可信状态掩盖。" action={<Button appearance="primary" icon={<Add24Regular />} onClick={() => editHost()}>新增主机</Button>}>
+    {tab === 'hosts' ? <Surface title="Hosts" description="SSH 指纹未确认时使用 Warning 状态，不能被绿色可信状态掩盖。" action={<Button appearance="primary" icon={<Add24Regular />} onClick={() => editHost()} disabled={fleetFreshness !== 'fresh'}>新增主机</Button>}>
       <div id="hosts" className="table-wrap">
         {!fleet.hosts.length ? <EmptyState>尚未添加主机。先添加凭据，再建立主机连接信息。</EmptyState> : <table className="data-table"><thead><tr><th>名称</th><th>地址</th><th>用户 / 端口</th><th>跳板</th><th>指纹状态</th><th>最近测试</th><th>状态</th><th>操作</th></tr></thead><tbody>
           {fleet.hosts.map(host => <tr key={host.id}>
@@ -214,20 +222,20 @@ export function HostsPage({fleet, refreshFleet, runTask, notify}: HostsPageProps
             <td>{host.username}<div className="muted mono">:{host.port}</div></td>
             <td>{host.jump_id ? hostName(host.jump_id) : '—'}</td>
             <td><StatusPill level={host.host_key ? 'ok' : 'warning'}>{host.host_key ? '已确认' : '待确认'}</StatusPill></td>
-            <td className="muted">后台记录以实际探测为准</td>
+            <td>{probeCache[host.id] ? <><StatusPill level={probeLevel(probeCache[host.id].result)}>{probeSummary(probeCache[host.id].result)}</StatusPill><div className="muted">{formatTime(probeCache[host.id].checkedAt)}</div></> : <span className="muted">本次会话未测试</span>}</td>
             <td><StatusPill level="info">已保存</StatusPill></td>
-            <td><ButtonRow><Button size="small" appearance="subtle" onClick={() => editHost(host.id)}>编辑</Button><Button size="small" appearance="subtle" onClick={() => void removeHost(host.id, host.name)}>删除</Button></ButtonRow></td>
+            <td><ButtonRow><Button size="small" appearance="subtle" onClick={() => editHost(host.id)} disabled={fleetFreshness !== 'fresh'}>编辑</Button><Button size="small" appearance="subtle" onClick={() => void removeHost(host.id, host.name)} disabled={fleetFreshness !== 'fresh'}>删除</Button></ButtonRow></td>
           </tr>)}
         </tbody></table>}
       </div>
     </Surface> : <Surface title="Credentials" description="只显示名称、类型和关联主机数；秘密材料不会重新读取。" action={<Button appearance="primary" icon={<Key24Regular />} onClick={() => setCredentialDialogOpen(true)}>新增凭据</Button>}>
       <div id="credentials" className="table-wrap">
         {!fleet.credentials.length ? <EmptyState>尚未保存凭据。</EmptyState> : <table className="data-table"><thead><tr><th>名称</th><th>类型</th><th>关联主机数</th><th>操作</th></tr></thead><tbody>
-          {fleet.credentials.map(credential => <tr key={credential.id}><td><strong>{credential.name}</strong><div className="muted mono">{credential.id}</div></td><td>{credential.kind === 'key' ? '私钥' : '密码'}</td><td>{credentialUseCount(credential.id)}</td><td><Button size="small" appearance="subtle" onClick={() => void removeCredential(credential.id, credential.name)}>删除</Button></td></tr>)}
+          {fleet.credentials.map(credential => <tr key={credential.id}><td><strong>{credential.name}</strong><div className="muted mono">{credential.id}</div></td><td>{credential.kind === 'key' ? '私钥' : '密码'}</td><td>{credentialUseCount(credential.id)}</td><td><Button size="small" appearance="subtle" onClick={() => void removeCredential(credential.id, credential.name)} disabled={fleetFreshness !== 'fresh'}>删除</Button></td></tr>)}
         </tbody></table>}
       </div>
     </Surface>}
-    <HostDialog key={`${hostDraft.id || 'new'}-${hostDialogOpen ? 'open' : 'closed'}`} open={hostDialogOpen} draft={hostDraft} credentials={fleet.credentials} hosts={fleet.hosts} onClose={() => setHostDialogOpen(false)} onSaved={refreshFleet} runTask={runTask} notify={notify} />
+    <HostDialog key={`${hostDraft.id || 'new'}-${hostDialogOpen ? 'open' : 'closed'}`} open={hostDialogOpen} draft={hostDraft} credentials={fleet.credentials} hosts={fleet.hosts} onClose={() => setHostDialogOpen(false)} onSaved={refreshFleet} onProbe={(hostId, result, checkedAt) => setProbeCache(current => ({...current, [hostId]: {result, checkedAt}}))} runTask={runTask} notify={notify} />
     <CredentialDialog open={credentialDialogOpen} onClose={() => setCredentialDialogOpen(false)} onSaved={refreshFleet} runTask={runTask} notify={notify} />
   </>;
 }

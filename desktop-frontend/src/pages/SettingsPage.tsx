@@ -1,22 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@fluentui/react-components';
 import { ArrowClockwise24Regular, Open24Regular } from '@fluentui/react-icons';
 import type { StatusResponse, UpdateResponse } from '../api/types';
 import { getUpdates } from '../api/updates';
+import type { RunTask } from '../app/types';
 import { PageIntro, StatusPill, Surface } from '../app/ui';
 
 interface SettingsPageProps {
   status: StatusResponse | null;
   updates: UpdateResponse | null;
   notify: (message: string) => void;
-  runTask: (operation: () => Promise<void>) => Promise<boolean>;
+  runTask: RunTask;
 }
 
 export function SettingsPage({status, updates: initialUpdates, notify, runTask}: SettingsPageProps) {
   const [updates, setUpdates] = useState<UpdateResponse | null>(initialUpdates);
+  const manualCheckRef = useRef(false);
   const background = status?.background;
 
+  useEffect(() => {
+    if (!manualCheckRef.current) setUpdates(initialUpdates);
+  }, [initialUpdates]);
+
   const checkUpdates = async () => {
+    manualCheckRef.current = true;
     if (!await runTask(async () => setUpdates(await getUpdates()))) return;
     notify('更新检查已完成。不会自动安装新版本。');
   };

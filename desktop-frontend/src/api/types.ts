@@ -160,7 +160,20 @@ export interface HostInspectResponse {
 
 export interface ProbeResult {
   id?: string;
-  ok?: boolean;
+  name?: string;
+  address?: string;
+  ssh?: boolean | null;
+  dns?: boolean | null;
+  internet?: boolean | null;
+  helper?: boolean | null;
+  client_supported?: boolean | null;
+  gateway_supported?: boolean | null;
+  os?: string;
+  hostname?: string;
+  default_route?: string;
+  http_code?: string;
+  error?: string;
+  checked_at?: number;
   [key: string]: unknown;
 }
 
@@ -261,6 +274,11 @@ export interface HostDraft {
   jump_id: string;
   host_key: string;
   group: string;
+  favorite: boolean;
+  terminal_enabled: boolean;
+  codex_enabled: boolean;
+  browser_enabled: boolean;
+  codex_workspace: string;
 }
 
 export interface CredentialDraft {

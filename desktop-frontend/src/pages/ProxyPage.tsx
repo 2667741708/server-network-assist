@@ -4,12 +4,15 @@ import { ArrowClockwise24Regular, Dismiss24Regular, History24Regular, Save24Regu
 import type { ProxyResponse, ProxySummary } from '../api/types';
 import { restoreProxy, saveProxy } from '../api/proxy';
 import { runTunnelAction } from '../api/status';
+import type { DataFreshness, RunTask } from '../app/types';
 import { ButtonRow, EmptyState, formatTime, PageIntro, StatusPill, Surface, unknown } from '../app/ui';
 
 interface ProxyPageProps {
   result: ProxyResponse | null;
+  proxyFreshness: DataFreshness;
   loadProxy: () => Promise<ProxyResponse>;
-  runTask: (operation: () => Promise<void>, confirmation?: {title: string; body: string}) => Promise<boolean>;
+  refreshStatus: (force?: boolean) => Promise<unknown>;
+  runTask: RunTask;
   notify: (message: string) => void;
 }
 
@@ -24,12 +27,14 @@ function proxyLabel(proxy: ProxySummary | undefined): string {
   return proxy.enabled ? '手动代理已开启' : proxy.pac ? 'PAC 生效，手动代理已关闭' : '手动代理已关闭';
 }
 
-function ProxyEditor({open, proxy, onClose, onSaved, runTask, notify}: {
+function ProxyEditor({open, proxy, onClose, onSaved, reload, refreshStatus, runTask, notify}: {
   open: boolean;
   proxy: ProxySummary | undefined;
   onClose: () => void;
   onSaved: (result: ProxyResponse) => void;
-  runTask: ProxyPageProps['runTask'];
+  reload: () => Promise<ProxyResponse>;
+  refreshStatus: ProxyPageProps['refreshStatus'];
+  runTask: RunTask;
   notify: ProxyPageProps['notify'];
 }) {
   const [enabled, setEnabled] = useState(Boolean(proxy?.enabled));
@@ -47,7 +52,9 @@ function ProxyEditor({open, proxy, onClose, onSaved, runTask, notify}: {
       const result = await saveProxy({enabled, server, bypass});
       onSaved(result);
       onClose();
-    }, {title: '保存当前用户代理？', body: '将先备份当前配置，再应用编辑后的代理。错误的地址会影响使用系统代理的应用。'})) return;
+    }, {title: '保存当前用户代理？', body: '将先备份当前配置，再应用编辑后的代理。错误的地址会影响使用系统代理的应用。'}, async () => {
+      await Promise.all([reload(), refreshStatus(true)]);
+    })) return;
     notify('已备份原配置并保存代理，请检查系统应用联网结果。');
   };
 
@@ -72,7 +79,7 @@ function ProxyEditor({open, proxy, onClose, onSaved, runTask, notify}: {
   </Dialog>;
 }
 
-export function ProxyPage({result, loadProxy, runTask, notify}: ProxyPageProps) {
+export function ProxyPage({result, proxyFreshness, loadProxy, refreshStatus, runTask, notify}: ProxyPageProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [current, setCurrent] = useState<ProxyResponse | null>(result);
   const proxy = current?.proxy;
@@ -87,21 +94,24 @@ export function ProxyPage({result, loadProxy, runTask, notify}: ProxyPageProps) 
   const disable = async () => {
     if (!await runTask(async () => {
       await runTunnelAction('disable-proxy');
-      setCurrent(await loadProxy());
-    }, {title: '关闭手动代理？', body: '将备份当前配置，再关闭手动代理。自动代理 PAC 或代理软件重新接管的设置需要单独检查。'})) return;
+    }, {title: '关闭手动代理？', body: '将备份当前配置，再关闭手动代理。自动代理 PAC 或代理软件重新接管的设置需要单独检查。'}, async () => {
+      await Promise.all([loadProxy(), refreshStatus(true)]);
+    })) return;
     notify('手动代理已关闭，原配置已备份。');
   };
 
   const restore = (id: string) => void runTask(async () => {
     setCurrent(await restoreProxy(id));
-  }, {title: '恢复代理配置？', body: `将恢复备份 ${id}，并先备份当前设置。恢复后请重新读取状态。`}).then(success => {if (success) notify('代理备份已恢复。');});
+  }, {title: '恢复代理配置？', body: `将恢复备份 ${id}，并先备份当前设置。恢复后请重新读取状态。`}, async () => {
+    await Promise.all([loadProxy(), refreshStatus(true)]);
+  }).then(success => {if (success) notify('代理备份已恢复。');});
 
   const manualText = proxy?.supported === false || proxy?.enabled == null ? '未知' : proxy.enabled ? '已开启' : '已关闭';
   const pacText = proxy?.supported === false || proxy?.enabled == null ? '未知' : proxy.pac ? '存在 PAC' : '未设置 PAC';
 
   return <>
     <PageIntro title="系统代理" description="先读取当前用户代理，再决定是否修改。每次写入和恢复都会保留可恢复的备份。" action={<Button appearance="subtle" icon={<ArrowClockwise24Regular />} onClick={() => void reload()}>重新读取</Button>} />
-    <Surface title="当前用户代理状态" description={proxy?.scope || '范围由后台返回；不扩大到其他用户或系统服务。'} action={<Button id="save-proxy" appearance="primary" onClick={() => setEditorOpen(true)} disabled={proxy?.supported === false}>备份并修改</Button>}>
+    <Surface title="当前用户代理状态" description={proxy?.scope || '范围由后台返回；不扩大到其他用户或系统服务。'} action={<Button id="save-proxy" appearance="primary" onClick={() => setEditorOpen(true)} disabled={proxyFreshness !== 'fresh' || proxy?.supported === false}>备份并修改</Button>}>
       <div id="proxy-state" className="status-hero" data-state={proxyLevel(proxy)} style={{padding: 18}}>
         <div className="status-hero-main">
           <StatusPill level={proxyLevel(proxy)}>{proxyLabel(proxy)}</StatusPill>
@@ -119,16 +129,16 @@ export function ProxyPage({result, loadProxy, runTask, notify}: ProxyPageProps) 
       </dl>
       <div className="form-actions">
         <Button id="load-proxy" appearance="subtle" onClick={() => void reload()}>重新读取</Button>
-        <Button id="disable-proxy" appearance="outline" disabled={proxy?.supported === false || !proxy?.enabled} onClick={() => void disable()}>备份并关闭</Button>
+        <Button id="disable-proxy" appearance="outline" disabled={proxyFreshness !== 'fresh' || proxy?.supported === false || !proxy?.enabled} onClick={() => void disable()}>备份并关闭</Button>
       </div>
     </Surface>
     <Surface title="代理备份历史" description="恢复操作需要确认；不兼容当前系统的备份不会被启用。">
       <div id="proxy-backups" className="table-wrap">
         {!current?.backups?.length ? <EmptyState>还没有代理配置备份。</EmptyState> : <table className="data-table"><thead><tr><th>时间</th><th>标识</th><th>平台</th><th>状态摘要</th><th>操作</th></tr></thead><tbody>
-          {current.backups.map(backup => <tr key={backup.id}><td>{formatTime(backup.created_at)}</td><td className="mono">{backup.id}</td><td>{backup.platform || '未知'}</td><td><StatusPill level={backup.compatible === false ? 'warning' : 'ok'}>{backup.compatible === false ? '不兼容当前系统' : '可恢复'}</StatusPill></td><td><ButtonRow><Button size="small" appearance="subtle" icon={<History24Regular />} disabled={backup.compatible === false} onClick={() => restore(backup.id)}>恢复</Button></ButtonRow></td></tr>)}
+          {current.backups.map(backup => <tr key={backup.id}><td>{formatTime(backup.created_at)}</td><td className="mono">{backup.id}</td><td>{backup.platform || '未知'}</td><td><StatusPill level={backup.compatible === false ? 'warning' : 'ok'}>{backup.compatible === false ? '不兼容当前系统' : '可恢复'}</StatusPill></td><td><ButtonRow><Button size="small" appearance="subtle" icon={<History24Regular />} disabled={proxyFreshness !== 'fresh' || backup.compatible === false} onClick={() => restore(backup.id)}>恢复</Button></ButtonRow></td></tr>)}
         </tbody></table>}
       </div>
     </Surface>
-    <ProxyEditor open={editorOpen} proxy={proxy} onClose={() => setEditorOpen(false)} onSaved={setCurrent} runTask={runTask} notify={notify} />
+    <ProxyEditor open={editorOpen} proxy={proxy} onClose={() => setEditorOpen(false)} onSaved={setCurrent} reload={loadProxy} refreshStatus={refreshStatus} runTask={runTask} notify={notify} />
   </>;
 }

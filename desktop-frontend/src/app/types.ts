@@ -11,6 +11,19 @@ export type SectionId =
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export type DataFreshness = 'fresh' | 'unknown';
+
+export interface Confirmation {
+  title: string;
+  body: string;
+}
+
+export type RunTask = (
+  operation: () => Promise<void>,
+  confirmation?: Confirmation,
+  sync?: () => Promise<unknown>,
+) => Promise<boolean>;
+
 export interface NavigationItem {
   id: SectionId;
   label: string;

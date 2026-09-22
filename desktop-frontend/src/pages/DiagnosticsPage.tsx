@@ -4,15 +4,20 @@ import { ArrowClockwise24Regular, ArrowDownload24Regular, Warning24Regular } fro
 import type { DiagnosticResponse, FleetAuditEvent, FleetState, StatusResponse } from '../api/types';
 import { disableProfile, getAudit } from '../api/fleet';
 import { runTunnelAction } from '../api/status';
+import { sharingActions } from '../app/sharingState';
+import type { DataFreshness, RunTask } from '../app/types';
 import { ButtonRow, EmptyState, formatTime, PageIntro, StatusPill, Surface } from '../app/ui';
 
 interface DiagnosticsPageProps {
   status: StatusResponse | null;
+  statusFreshness: DataFreshness;
   fleet: FleetState;
+  fleetFreshness: DataFreshness;
   diagnostics: DiagnosticResponse | null;
   loadDiagnostics: () => Promise<DiagnosticResponse>;
-  refreshStatus: () => Promise<StatusResponse | null>;
-  runTask: (operation: () => Promise<void>, confirmation?: {title: string; body: string}) => Promise<boolean>;
+  refreshStatus: (force?: boolean) => Promise<StatusResponse | null>;
+  refreshFleet: () => Promise<FleetState>;
+  runTask: RunTask;
   notify: (message: string) => void;
 }
 
@@ -51,7 +56,7 @@ function EventList({events, fleetEvents, kind}: {events: DiagnosticResponse['eve
   return <div id="fleet-events" className="event-list">{fleetEvents.map((event, index) => <div className="event-item" key={`${event.created_at || 0}-${index}`}><strong>{formatTime(event.created_at)} · {event.action || '事件'}</strong><p className="mono">{event.target || '未指定目标'} · {localEventText(event.details)}</p></div>)}</div>;
 }
 
-export function DiagnosticsPage({status, fleet, diagnostics, loadDiagnostics, refreshStatus, runTask, notify}: DiagnosticsPageProps) {
+export function DiagnosticsPage({status, statusFreshness, fleet, fleetFreshness, diagnostics, loadDiagnostics, refreshStatus, refreshFleet, runTask, notify}: DiagnosticsPageProps) {
   const [fleetEvents, setFleetEvents] = useState<FleetAuditEvent[]>([]);
   const [selectedProfile, setSelectedProfile] = useState('');
   const effectiveStatus = diagnostics?.status || status;
@@ -108,26 +113,35 @@ export function DiagnosticsPage({status, fleet, diagnostics, loadDiagnostics, re
       notify('请选择要恢复的共享方案。');
       return;
     }
+    if (fleetFreshness !== 'fresh' || !sharingActions(profile, fleetFreshness).disable) {
+      notify('共享方案状态未知或不允许恢复，请先重新读取 Fleet 状态。');
+      return;
+    }
     if (!await runTask(async () => {
       await disableProfile(profile.id);
-      await refreshStatus();
+    }, {title: '恢复共享网络？', body: `将对方案“${profile.name}”执行现有恢复流程，清理它拥有的隧道与临时路由；客户端网络可能短暂中断。`}, async () => {
+      await refreshStatus(true);
+      await refreshFleet();
       await loadDiagnostics();
-    }, {title: '恢复共享网络？', body: `将对方案“${profile.name}”执行现有恢复流程，清理它拥有的隧道与临时路由；客户端网络可能短暂中断。`})) return;
+    })) return;
     notify('共享网络恢复请求已完成，请重新读取诊断状态。');
   };
 
   const restoreProxy = async () => {
     if (!await runTask(async () => {
       await runTunnelAction('disable-proxy');
-      await refreshStatus();
+    }, {title: '恢复代理？', body: '将通过现有代理备份逻辑关闭当前用户手动代理；PAC 不会因此被移除。恢复后请查看系统代理页面。'}, async () => {
+      await refreshStatus(true);
       await loadDiagnostics();
-    }, {title: '恢复代理？', body: '将通过现有代理备份逻辑关闭当前用户手动代理；PAC 不会因此被移除。恢复后请查看系统代理页面。'})) return;
+    })) return;
     notify('代理恢复请求已完成，请重新读取代理状态。');
   };
 
   const checkTunnels = async () => {
     if (!await runTask(async () => {
-      await refreshStatus();
+      return;
+    }, undefined, async () => {
+      await refreshStatus(true);
       await loadDiagnostics();
     })) return;
     notify('隧道检查已完成。');
@@ -143,8 +157,8 @@ export function DiagnosticsPage({status, fleet, diagnostics, loadDiagnostics, re
       <Surface title="恢复入口" description="选择明确对象后再执行，所有写操作都使用现有 typed backend API。">
         <Field label="共享方案"><Select value={selectedProfile} onChange={event => setSelectedProfile(event.target.value)}><option value="">选择需要恢复的方案</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name} · {profile.state}</option>)}</Select></Field>
         <div className="form-actions" style={{justifyContent: 'flex-start'}}>
-          <Button data-go="restore-sharing" appearance="outline" icon={<Warning24Regular />} onClick={() => void restoreSharing()}>恢复共享网络</Button>
-          <Button data-go="restore-proxy" appearance="outline" onClick={() => void restoreProxy()}>恢复代理</Button>
+          <Button data-go="restore-sharing" appearance="outline" icon={<Warning24Regular />} disabled={fleetFreshness !== 'fresh' || statusFreshness !== 'fresh'} onClick={() => void restoreSharing()}>恢复共享网络</Button>
+          <Button data-go="restore-proxy" appearance="outline" disabled={statusFreshness !== 'fresh'} onClick={() => void restoreProxy()}>恢复代理</Button>
           <Button data-go="check-tunnel" appearance="subtle" onClick={() => void checkTunnels()}>检查隧道</Button>
         </div>
       </Surface>

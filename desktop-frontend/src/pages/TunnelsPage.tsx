@@ -4,12 +4,14 @@ import { ArrowClockwise24Regular, ArrowRight24Regular, Dismiss24Regular, LockClo
 import type { CampusStatus, RecoveryRecord, StatusResponse, TunnelInfo } from '../api/types';
 import { getCampus, getCampusStatus, loginCampus } from '../api/campus';
 import { runTunnelAction } from '../api/status';
+import type { DataFreshness, RunTask } from '../app/types';
 import { ButtonRow, EmptyState, formatAge, formatBytes, formatTime, PageIntro, StatusPill, Surface, unknown } from '../app/ui';
 
 interface TunnelsPageProps {
   status: StatusResponse | null;
-  runTask: (operation: () => Promise<void>, confirmation?: {title: string; body: string}) => Promise<boolean>;
-  refreshStatus: () => Promise<StatusResponse | null>;
+  statusFreshness: DataFreshness;
+  runTask: RunTask;
+  refreshStatus: (force?: boolean) => Promise<StatusResponse | null>;
   notify: (message: string) => void;
 }
 
@@ -19,22 +21,23 @@ function tunnelLevel(tunnel: TunnelInfo, timestamp?: number): 'ok' | 'warning' {
   return 'ok';
 }
 
-function TunnelItem({tunnel, timestamp, elevated, recovery, runTask, refreshStatus, notify}: {
+function TunnelItem({tunnel, timestamp, elevated, recovery, statusFreshness, runTask, refreshStatus, notify}: {
   tunnel: TunnelInfo;
   timestamp?: number;
   elevated: boolean;
   recovery?: RecoveryRecord;
-  runTask: TunnelsPageProps['runTask'];
+  statusFreshness: DataFreshness;
+  runTask: RunTask;
   refreshStatus: TunnelsPageProps['refreshStatus'];
   notify: TunnelsPageProps['notify'];
 }) {
   const level = tunnelLevel(tunnel, timestamp);
   const disabled = ['Disabled', 'masked'].includes(tunnel.start_mode || '');
+  const stateKnown = statusFreshness === 'fresh';
   const perform = async (action: 'connect' | 'disconnect' | 'pause-sharing' | 'restore-startup', confirmation: {title: string; body: string}) => {
     if (!await runTask(async () => {
       await runTunnelAction(action, tunnel.name);
-      await refreshStatus();
-    }, confirmation)) return;
+    }, confirmation, () => refreshStatus(true))) return;
     notify(action === 'pause-sharing' ? '已停止本机借网并禁用自动启动。请核对物理网关、代理和旧脚本额外路由，再登录校园网。' : '隧道操作已完成，请核对最新连通性。');
   };
   const age = formatAge(tunnel.handshake, timestamp);
@@ -65,24 +68,24 @@ function TunnelItem({tunnel, timestamp, elevated, recovery, runTask, refreshStat
       <ButtonRow>
         <Button
           appearance={tunnel.active ? 'outline' : 'primary'}
-          disabled={!elevated || (!tunnel.active && disabled)}
+          disabled={!stateKnown || !elevated || (!tunnel.active && disabled)}
           onClick={() => perform(tunnel.active ? 'disconnect' : 'connect', tunnel.active
             ? {title: '临时断开借网隧道？', body: '将停止本机隧道；依赖隧道的连接可能中断。不会禁用下次自动启动。'}
             : {title: '连接本机隧道？', body: '将启动此 WireGuard 服务并改变本机隧道状态，请确认当前方案和权限。'})}
         >{tunnel.active ? '临时断开' : '连接'}</Button>
         <Button
           appearance="outline"
-          disabled={!elevated}
+          disabled={!stateKnown || !elevated}
           icon={<LockClosed24Regular />}
           onClick={() => perform('pause-sharing', {title: '停止借网并禁用自动启动？', body: '先备份启动配置，再停止并禁用此本机隧道服务。依赖隧道的连接可能中断；不会猜测删除旧脚本额外路由或恢复代理。'})}
         >停止借网</Button>
-        {recovery && <Button appearance="outline" disabled={!elevated} onClick={() => perform('restore-startup', {title: '恢复原借网服务配置？', body: `将恢复 ${tunnel.name} 的启动方式与原运行状态。恢复完成后请重新检查连接状态。`})}>恢复配置</Button>}
+        {recovery && <Button appearance="outline" disabled={!stateKnown || !elevated} onClick={() => perform('restore-startup', {title: '恢复原借网服务配置？', body: `将恢复 ${tunnel.name} 的启动方式与原运行状态。恢复完成后请重新检查连接状态。`})}>恢复配置</Button>}
       </ButtonRow>
     </div>
   </article>;
 }
 
-function CampusPanel({runTask, notify}: Pick<TunnelsPageProps, 'runTask' | 'notify'>) {
+function CampusPanel({runTask, refreshStatus, notify}: Pick<TunnelsPageProps, 'runTask' | 'refreshStatus' | 'notify'>) {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [current, setCurrent] = useState<CampusStatus | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -106,7 +109,7 @@ function CampusPanel({runTask, notify}: Pick<TunnelsPageProps, 'runTask' | 'noti
       setCurrent(result.current || null);
       setDialogOpen(false);
       setConfirmed(false);
-    })) return;
+    }, undefined, () => refreshStatus(true))) return;
     notify('校园网认证请求已完成，请查看当前状态复核账号与运营商。');
   };
 
@@ -147,10 +150,11 @@ function CampusPanel({runTask, notify}: Pick<TunnelsPageProps, 'runTask' | 'noti
   </Surface>;
 }
 
-export function TunnelsPage({status, runTask, refreshStatus, notify}: TunnelsPageProps) {
+export function TunnelsPage({status, statusFreshness, runTask, refreshStatus, notify}: TunnelsPageProps) {
   const tunnels = status?.tunnels || [];
   return <>
     <PageIntro title="本机隧道" description="每个 WireGuard 隧道的服务状态、最近握手和计数器集中在这里。停止借网属于危险操作，会与普通临时断开区分。" />
+    {statusFreshness !== 'fresh' && <p className="muted" role="status">服务端隧道状态未知或已过期；刷新成功前不会开放连接、停止借网或恢复操作。</p>}
     <Surface title="WireGuard 隧道" description="租约或服务状态为活动不等于公网可用；请结合最近握手、实际探测和连接概览判断。">
       <div id="tunnels" className="tunnel-list">
         {!tunnels.length && <EmptyState>尚未发现已安装的隧道。可以在“共享网络”创建方案。</EmptyState>}
@@ -160,13 +164,14 @@ export function TunnelsPage({status, runTask, refreshStatus, notify}: TunnelsPag
           timestamp={status?.timestamp}
           elevated={status?.elevated === true}
           recovery={(status?.recovery || []).find(record => record.name === tunnel.name && record.state !== 'restored')}
+          statusFreshness={statusFreshness}
           runTask={runTask}
           refreshStatus={refreshStatus}
           notify={notify}
         />)}
       </div>
     </Surface>
-    <CampusPanel runTask={runTask} notify={notify} />
+    <CampusPanel runTask={runTask} refreshStatus={refreshStatus} notify={notify} />
     {status && <p className="muted" style={{marginTop: 14}}>本页状态读取于 {formatTime(status.timestamp)}。本机权限：{status.elevated ? '已就绪' : '需要管理员权限'}。</p>}
   </>;
 }
