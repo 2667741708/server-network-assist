@@ -42,7 +42,7 @@
 
 完整安装、升级及使用方式见 [桌面面板指南](docs/DESKTOP.md)。
 
-桌面面板复用 **Framework7 9.1.3 的现成 iOS 组件**，支持深浅主题，所有样式随程序离线提供。组件来源、MIT 授权和设计师候选记录见 [UI 来源说明](docs/UI_SOURCES.md)。多主机管理台继续使用 Angular Material。
+桌面面板使用 **React + TypeScript + Vite + Fluent UI React v9**，支持深浅主题，所有资源随程序离线提供。桌面 UI 的迁移边界、构建方式和验证命令见 [前端现代化说明](docs/frontend-modernization.md)。多机管理台继续使用 Angular Material。
 
 所有公开项目的统一入口位于 [项目博客](https://whm12.art/projects/)，使用现成 AstroPaper 主题与 Decap CMS。选择项目、五种文章模板、图片正文、草稿和预览流程见 [博客编辑指南](docs/BLOG_STUDIO.md)。线上 GitHub 登录与发布还需要配置 OAuth App。
 

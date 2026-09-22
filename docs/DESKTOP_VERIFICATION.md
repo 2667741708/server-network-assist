@@ -1,64 +1,40 @@
-# 桌面面板 v0.3.0 验收记录
+# Desktop verification
 
-验收日期：2026-09-11。由独立验证智能体检查；生产环境只读取状态，没有切换隧道、编辑代理或改动远端网络。
+This checklist covers the React/TypeScript/Vite desktop console. It is intentionally separate from physical network acceptance: browser fixtures mock API responses and must not be used to claim that a real WireGuard or proxy change was performed.
 
-## 本地验证
-
-| 项目 | 结果与边界 |
-| --- | --- |
-| 桌面后端 | 33 项测试通过；包含真实 HTTP 鉴权、SQLite/Fernet 凭据库、主机与共享方案 CRUD、引用保护及恢复保护 |
-| 托盘 | 7 项测试通过；覆盖单实例锁、心跳、缺少依赖、通知状态、安装健康检查重试 |
-| 桌面及移动端 UI | 1280×960 和 390×844 E2E 通过，覆盖导航、凭据、主机公钥确认、共享方案、源代理选择、备份恢复、诊断导出、更新链接、失败和取消 |
-| UI 来源 | 使用官方 Framework7 iOS 组件；测试校验厂商 JS 与项目内已记录来源的版本一致 |
-| 长文本 | 主机名称、地址、错误、列表及移动布局检查通过；已人工查看截图 |
-| OS/远端写操作 | 代理写入与网络切换使用隔离模拟；不将模拟结果表述为四种 Windows/Ubuntu 物理组网均已实测 |
-
-测试命令：
+## Static build
 
 ```text
-python -m unittest discover -s tests -p "test_desktop*.py" -v
-python -m unittest discover -s tests -p test_tray.py -v
+Set-Location desktop-frontend
+npm install
+npm run typecheck
+npm run build
+Set-Location ..
+python scripts/sync_ui_assets.py
+```
+
+The Python panel serves `index.html`, `desktop.js`, `desktop.css`, and `icon.svg` from its package directory. The desktop server does not expose Framework7 assets or a generic arbitrary-file route.
+
+## Browser regression
+
+```text
 node frontend/desktop-e2e.cjs
 ```
 
-## Titan 实际部署
+The browser check covers:
 
-独立读取已安装服务，确认版本 **0.3.0**，进程 PID **3088**。PID、端口和下面的数据仅代表本次验收快照。
+- API token enforcement and removal of the launch token from the URL;
+- sidebar navigation at 1280×960 and 390×844;
+- overview rendering and explicit WireGuard-only traffic scope;
+- tunnel connect, disconnect, pause, restore, and campus password clearing;
+- host and credential separation, secret clearing, and SSH fingerprint warning/confirmation;
+- sharing profile list/detail path, source-proxy distinction, helper confirmation, probe, enable, and recovery;
+- proxy backup, modification, disable, restore, unsupported state, and PAC wording;
+- diagnostic status/guidance separation, local/Fleet events, recovery confirmation, and report export;
+- update status without automatic installation, long values, failure messages, and theme persistence.
 
-| 检查 | 实际结果 |
-| --- | --- |
-| 健康检查 | 200，版本与实例 PID 匹配 |
-| 主机、凭据、共享方案接口 | `/api/fleet/hosts`、`/api/fleet/credentials`、`/api/fleet/network` 均为 200 |
-| 代理、诊断接口 | `/api/proxy`、`/api/diagnostics` 均为 200 |
-| 未认证状态请求 | 403，令牌没有输出到报告 |
-| 直连/应用路径探测 | 均成功，本次分别为 66 ms / 62 ms；应用路径不执行 PAC |
-| 原有隧道 | `fleet-titan` 持续连接；没有为验收断开 |
-| Windows 手动代理 | 关闭 |
-| 后台/托盘/状态通知 | 后台运行，托盘运行，通知开启 |
-| 静态包 | 页面、desktop.js、desktop.css、Framework7 JS/CSS 和主题 CSS 共 6 个文件：HTTP 内容与已安装文件逐字节相等；与工作区按 LF 统一换行后的 SHA256 全部一致 |
+All mutation requests remain the existing typed API actions. No generic shell, arbitrary remote command, arbitrary path, or new network operation is part of the UI.
 
-连续状态样本来自真实 WireGuard 计数器；这不是整机网卡流量。
+## Real-system boundary
 
-| 样本 | 上传 B/s | 下载 B/s | 历史点数 | 直连/应用探测 | 隧道 |
-| --- | ---: | ---: | ---: | --- | --- |
-| 1 | 654.04 | 6170.89 | 14 | 成功/成功 | 活动 |
-| 2 | 775.06 | 6930.29 | 15 | 成功/成功 | 活动 |
-| 3 | 632.27 | 9824.95 | 16 | 成功/成功 | 活动 |
-
-三次样本累计发送/接收值持续增加，历史点数增加，托盘心跳和通知能力一直有效。
-
-## 修复的验收问题
-
-- 状态读取失败不会再被“状态已刷新”或操作成功提示覆盖。
-- 尚未清理完成的共享方案保留 SSH 恢复路径，禁止修改连接字段；仍允许修改显示名称。
-- 中断后残留的启用中/恢复中方案仍有恢复入口，由后端串行执行。
-- 不支持读取代理及不可读取流量时，显示未知，而不是已关闭或零流量。
-- 代理自动回滚增加读回验证，不把静默失败报告为已恢复。
-- Windows 客户端关闭请求时，不把响应写入中断当作操作失败。
-- 安装时等待旧后台退出，避免新实例争用旧锁；升级失败保留恢复旧版本路径。
-
-## 尚不能据此宣称的能力
-
-本次没有在生产环境执行新建方案后的网络切换或真实代理覆盖；跨系统路由切换的验证包含代码级与隔离测试，不代表四种系统配对均完成现场验收。Ubuntu GNOME 代理与托盘还需要登录图形会话验证。
-
-本次真实更新检查接口可用，但 GitHub 返回 **HTTP 403**，面板如实显示失败并保留官方发布页入口。因此本次不能宣称已成功取得或安装远程 Release。源码提交也不能替代正式发布包；更新下载与安装须另行核验。
+The desktop UI test does not disconnect a real tunnel, modify a real system proxy, log into a campus network, or alter a remote host. Production verification must separately confirm the existing backend safety guarantees, including route ownership, rollback, host-key validation, credential encryption, and campus physical-network preconditions.

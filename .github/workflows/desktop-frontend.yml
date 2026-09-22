@@ -1,0 +1,56 @@
+name: Desktop frontend
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop-frontend/package-lock.json
+      - name: Install desktop frontend dependencies
+        run: npm ci
+        working-directory: desktop-frontend
+      - name: Typecheck desktop frontend
+        run: npm run typecheck
+        working-directory: desktop-frontend
+      - name: Run desktop frontend tests
+        run: npm test
+        working-directory: desktop-frontend
+      - name: Build desktop frontend
+        run: npm run build
+        working-directory: desktop-frontend
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backend package for desktop e2e
+        run: python -m pip install .
+      - name: Verify generated desktop assets
+        run: python scripts/sync_ui_assets.py
+      - name: Install browser harness dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Run desktop browser contract test
+        run: node desktop-e2e.cjs
+        working-directory: frontend
+        env:
+          PANEL_TEST_PYTHON: python
+      - name: Upload desktop e2e evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-frontend-e2e
+          path: artifacts/desktop-*.png
