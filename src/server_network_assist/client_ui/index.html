@@ -1,14 +1,99 @@
 <!doctype html>
 <html lang="zh-CN" class="ios">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>借网客户端</title><link rel="stylesheet" href="/framework7-bundle.min.css"><link rel="stylesheet" href="/framework7-default-theme.css"><link rel="stylesheet" href="/client.css"><script src="/framework7-bundle.min.js" defer></script><script src="/client.js" defer></script></head>
-<body><div id="app"><div class="view view-main"><div class="page page-current">
-<header class="navbar"><div class="navbar-bg"></div><div class="navbar-inner"><div class="title">借网客户端</div><div class="right"><button id="refresh" class="button">刷新</button></div></div></header>
-<main class="page-content">
-<div id="notice" class="block block-strong inset" role="status" hidden></div>
-<section class="block"><p class="eyebrow">SERVER NETWORK ASSIST CLIENT</p><h1>你的网络线路</h1><p id="identity">正在读取本机状态</p></section>
-<article class="card hero"><div class="card-content card-content-padding"><div class="status-row"><span id="status-dot" class="status-dot"></span><strong id="status-title">等待订阅</strong></div><p id="status-detail">添加管理员提供的签名订阅地址后即可查看获授权线路。</p><div class="metrics"><div><span>可用线路</span><strong id="line-count">—</strong></div><div><span>订阅到期</span><strong id="expires">—</strong></div><div><span>运行平台</span><strong id="platform">—</strong></div></div></div></article>
-<section class="block-title">订阅</section><form id="subscription-form" class="card"><div class="card-content card-content-padding"><label for="subscription-url">管理员提供的订阅地址</label><textarea id="subscription-url" rows="3" placeholder="http://10.20.32.13:9182/#enroll=一次性令牌" required></textarea><p class="help">直接粘贴地址即可，客户端会在后台读取，不需要用浏览器打开。校园网私有地址优先；公网 HTTPS 地址可继续作为备用入口。</p><div class="action-row"><button class="button button-fill" type="submit">读取订阅</button><button id="update" class="button button-outline" type="button">更新订阅</button><button id="remove" class="button button-outline color-red" type="button">移除订阅</button></div><p id="subscription-summary" class="mono wrap"></p></div></form>
-<section id="online-section" hidden><section class="block-title">在线源网节点</section><article class="card"><div class="card-content card-content-padding"><p id="online-customer"></p><div class="metrics"><div><span>已用流量</span><strong id="online-used">—</strong></div><div><span>剩余流量</span><strong id="online-remaining">—</strong></div><div><span>计量周期结束</span><strong id="online-period">—</strong></div></div><p id="online-lease" class="mono wrap"></p></div></article><div id="online-lines"></div></section>
-<section class="block-title">获授权线路</section><div id="lines"></div>
-<section class="block-title">安全边界</section><article class="card"><div class="card-content card-content-padding"><ul class="plain-list"><li>只控制订阅列出的本机 WireGuard 隧道。</li><li>借网前检查接入点；退网后检查原网络是否恢复。</li><li>线路限速、流量额度和有效期由服务端执行，客户端数据仅作展示。</li><li>订阅过期、签名错误或线路未安装时拒绝连接。</li></ul></div></article>
-</main></div></div></div></body></html>
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>纯享入网</title>
+  <link rel="stylesheet" href="/framework7-bundle.min.css"><link rel="stylesheet" href="/framework7-default-theme.css"><link rel="stylesheet" href="/client.css">
+  <script src="/framework7-bundle.min.js" defer></script><link rel="stylesheet" href="/smooth-navigation.css"><script src="/smooth-navigation.js" defer></script><script src="/client.js" defer></script>
+</head>
+<body><noscript><p>实时订阅和网络控制需要 JavaScript。退出入网也可使用客户端命令 --leave-network；请启用 JavaScript 后操作。</p></noscript><div id="app"><div class="view view-main"><div class="page page-current page-with-navbar">
+  <header class="navbar client-titlebar"><div class="navbar-bg"></div><div class="navbar-inner">
+    <div class="title brand pywebview-drag-region"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#268457"/><path d="M17 35h7l6-15 7 26 6-15h5" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>纯享入网</span></div>
+    <div id="window-controls" class="window-controls right" hidden><button id="window-minimize" class="button" aria-label="最小化" title="最小化到托盘">&#x2212;</button><button id="window-maximize" class="button" aria-label="最大化或还原" title="最大化或还原">&#x25a1;</button><button id="window-close" class="button color-red" aria-label="恢复原网络并关闭" title="恢复原网络并关闭">&#x00d7;</button></div>
+  </div></header>
+  <main class="page-content">
+    <section id="subscription-settings" class="card" aria-label="添加订阅">
+      <div class="card-header">添加订阅</div>
+      <div class="card-content card-content-padding">
+        <form id="subscription-form" method="post">
+          <div class="list no-hairlines no-hairlines-between subscription-inputs"><ul>
+            <li class="item-content item-input"><div class="item-inner"><label class="item-title item-label" for="subscription-url">订阅网址或订阅码</label><div class="item-input-wrap"><textarea id="subscription-url" rows="2" maxlength="8192" placeholder="粘贴完整网址或 PURE1- 订阅码" aria-describedby="subscription-input-note" required></textarea></div></div></li>
+            <li class="item-content item-input"><div class="item-inner"><label class="item-title item-label" for="subscription-label">订阅名称（可选）</label><div class="item-input-wrap"><input id="subscription-label" type="text" maxlength="120" placeholder="例如：月度套餐 / 备用源网"></div></div></li>
+          </ul></div>
+          <p id="subscription-input-note" class="help">无需打开订阅网页，也无需填写校园账号。</p>
+          <button id="read-subscription" class="button button-fill" type="submit">添加订阅</button>
+          <p id="subscription-help" class="help">添加后，手动选择源网并开始入网。</p>
+        </form>
+      </div>
+    </section>
+    <div id="notice" class="block block-strong inset" role="status" hidden></div>
+    <div id="network-alert" class="block block-strong inset" role="alert" hidden></div>
+
+    <section class="card connection-panel" aria-label="入网连接">
+      <div class="card-content card-content-padding connection-heading">
+        <div class="status-row"><span id="status-dot" class="status-dot" aria-hidden="true"></span><h1 id="status-title">当前未入网</h1><span id="access-badge" class="badge color-gray">接入尚未检查</span></div>
+        <p id="status-detail" class="muted">校园内网直连 · 公网按需入网</p>
+        <p class="current-subscription"><span class="muted">当前订阅</span><strong id="current-subscription-name">未添加</strong></p>
+      </div>
+      <div class="block-title source-heading">源网节点 · 手动选择</div>
+      <p id="source-status-summary" class="block help wrap" role="status" aria-live="polite">启动及添加订阅后自动查询源网 · 不自动入网</p>
+      <div id="online-lines" class="list list-strong list-dividers-ios source-list" role="group" aria-label="选择源网节点"><ul><li><div class="item-content"><div class="item-inner"><div class="item-title muted wrap">读取订阅后显示授权节点</div></div></div></li></ul></div>
+      <div class="card-content card-content-padding connection-actions">
+        <div class="action-row"><button id="start-borrow" class="button button-fill button-large" title="个人校园账号在线时先自动 Logout" aria-describedby="start-help" disabled>开始入网</button><button id="leave-network" class="button button-outline button-large color-red">退出入网 · 恢复原网络</button></div>
+        <p id="start-help" class="help wrap" role="status">正在读取客户端状态…</p>
+        <p class="help safety-note">切换热点、接入断开或个人账号优先时自动退网；恢复未完成时禁止再次入网。最小化进入托盘，关闭窗口会先恢复原网络。</p>
+      </div>
+    </section>
+
+    <section class="card plan-panel" aria-label="我的套餐">
+      <div class="card-header">我的套餐<span id="plan-data-state" class="muted">尚未读取</span></div>
+      <div class="card-content card-content-padding">
+        <div class="metrics plan-metrics"><div><span>剩余流量</span><strong id="online-remaining">—</strong></div><div><span>套餐到期</span><strong id="online-period">—</strong></div><div class="metric-wide"><span>套餐限速 · 下行 / 上行</span><strong id="plan-speed">—</strong></div></div>
+        <p id="usage-note" class="help" hidden></p>
+      </div>
+      <div class="card-footer help">套餐到期以订阅服务为准，短期连接租约不代表套餐到期。</div>
+    </section>
+    <section class="card traffic-panel" aria-label="本机流量">
+      <div class="card-header">本机流量<span class="muted">隧道统计</span></div>
+      <div class="card-content card-content-padding">
+        <div class="metrics traffic-metrics"><div><span>今日流量 · 本机</span><strong id="traffic-today">—</strong></div><div><span>此订阅累计 · 本机</span><strong id="traffic-total">—</strong></div><div class="metric-wide"><span>实时下载 / 上传</span><strong id="traffic-speed">—</strong></div></div>
+        <p id="traffic-note" class="help wrap">本机入网隧道统计，不包含校园内网直连流量；套餐扣费以服务端为准。</p>
+      </div>
+    </section>
+
+    <div class="list list-strong inset accordion-list history-list"><ul><li id="subscription-history" class="accordion-item">
+      <a class="item-link item-content" href="?view=subscription-history" data-smooth-view="subscription-history" aria-expanded="false" aria-controls="subscription-history-content"><div class="item-inner"><div class="item-title">我的订阅<span class="item-subtitle">切换、刷新与移除</span></div><div id="subscription-state" class="item-after">未添加</div></div></a>
+      <div id="subscription-history-content" class="accordion-item-content"><div class="block">
+        <div id="saved-subscriptions" class="saved-subscriptions" aria-label="已保存的订阅列表"></div>
+        <div class="action-row"><button id="refresh-subscription" class="button button-outline" type="button">刷新当前订阅</button><button id="import-subscriptions" class="button button-outline" type="button">导入旧版订阅</button></div>
+        <button id="remove" class="button color-red remove-current" type="button" disabled>移除当前订阅</button>
+        <p class="help wrap">订阅独立保存。切换或移除当前订阅时先退网，切换完成后需手动开始；移除备用订阅不影响当前入网。</p>
+      </div></div>
+    </li></ul></div>
+
+    <div class="block-title">辅助设置</div>
+    <div class="list list-strong inset list-dividers-ios accordion-list settings-list"><ul>
+      <li id="access-settings" class="accordion-item">
+        <a class="item-link item-content" href="?view=access-settings" data-smooth-view="access-settings" aria-expanded="false" aria-controls="access-settings-content"><div class="item-inner"><div class="item-title">接入保护与帮助</div></div></a>
+        <div id="access-settings-content" class="accordion-item-content"><div class="block">
+          <dl class="access-details"><div><dt>当前物理网络</dt><dd id="guard-network">等待手动检查</dd></div><div><dt>校园接入</dt><dd id="guard-campus">入网前会再次验证</dd></div><div><dt>订阅入口</dt><dd id="guard-service">请先读取订阅</dd></div><div><dt>个人校园账号</dt><dd id="guard-account">个人账号优先</dd></div><div><dt>源网可达性</dt><dd id="guard-source">请先读取订阅，再检查</dd></div></dl>
+          <div class="action-row"><button id="scan-wifi" class="button button-outline">扫描 Wi-Fi</button><button id="check-access" class="button button-outline">检查订阅与源网</button></div>
+          <p id="wifi-message" class="help wrap" role="status">开放 Wi-Fi 指无线无密码；校园公网仍需认证。</p><div id="wifi-networks" class="wifi-networks" aria-label="附近无线网络"></div>
+          <p id="guard-message" class="help wrap" role="status">只检查接入，不切换 Wi-Fi，不启动入网。</p>
+          <button id="personal-login" class="button button-outline">使用自己的校园网账号 · 先退网</button>
+          <button id="campus-logout" class="button color-red" title="仅注销当前校园认证，不断开网络连接">注销校园账号</button>
+          <p id="campus-logout-message" class="help wrap" role="status" hidden></p>
+          <p id="identity" class="help wrap"></p>
+        </div></div>
+      </li>
+      <li id="notification-settings" class="accordion-item">
+        <a class="item-link item-content" href="?view=notification-settings" data-smooth-view="notification-settings" aria-expanded="false" aria-controls="notification-settings-content"><div class="item-inner"><div class="item-title">通知设置</div><div id="notification-state" class="item-after">开启</div></div></a>
+        <div id="notification-settings-content" class="accordion-item-content"><div class="block">
+          <label class="item-content notification-toggle"><span class="item-inner wrap">桌面弹窗通知</span><span class="toggle"><input id="desktop-notifications" type="checkbox" checked aria-label="桌面弹窗通知"><span class="toggle-icon"></span></span></label>
+          <p class="help wrap">关闭后不再发送托盘弹窗。接入断开、网络切换与恢复失败仍会在客户端显示；同类提醒一分钟内不重复弹出窗口。设置自动保存，重启后保留。</p>
+        </div></div>
+      </li>
+    </ul></div>
+    <p class="block footer-help">校园内网直连 · 公网按需入网 · 个人网络优先</p>
+  </main>
+</div></div></div></body></html>

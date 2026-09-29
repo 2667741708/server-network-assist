@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('EnsureGateway','ApplyPeer','RemovePeer')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('EnsureGateway','ApplyPeer','RemovePeer','QuarantinePeer')][string]$Action,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9_.-]{1,80}$')][string]$PeerId,
     [Parameter(Mandatory=$true)][string]$Interface,
     [Parameter(Mandatory=$true)][string]$EgressInterface,
@@ -37,14 +37,21 @@ function Remove-PeerRules {
 function Apply-PeerRules {
     Remove-PeerRules
     New-NetFirewallRule -Name ($rulePrefix + '-clients') -DisplayName 'SNA commercial client isolation' -Direction Inbound -Action Block -InterfaceAlias $Interface -RemoteAddress $clientAddress -LocalAddress $CustomerSubnet -Profile Any | Out-Null
+    New-NetFirewallRule -Name ($rulePrefix + '-clients-forward') -DisplayName 'SNA commercial client forward isolation' -Direction Outbound -Action Block -InterfaceAlias $Interface -LocalAddress $clientAddress -RemoteAddress $CustomerSubnet -Profile Any | Out-Null
     $networks = @($ManagementSubnets.Split(',') | Where-Object { $_ })
     $index = 0
     foreach ($network in $networks) {
         New-NetFirewallRule -Name ($rulePrefix + '-management-' + $index) -DisplayName 'SNA commercial management isolation' -Direction Inbound -Action Block -InterfaceAlias $Interface -RemoteAddress $clientAddress -LocalAddress $network -Profile Any | Out-Null
+        New-NetFirewallRule -Name ($rulePrefix + '-management-forward-' + $index) -DisplayName 'SNA commercial management forward isolation' -Direction Outbound -Action Block -InterfaceAlias $EgressInterface -LocalAddress $clientAddress -RemoteAddress $network -Profile Any | Out-Null
         $index++
     }
+    # IPv6 is explicitly fail-closed on the managed interface.  The current
+    # product accepts IPv4 /32 leases only and must not expose an IPv6 bypass.
+    New-NetFirewallRule -Name ($rulePrefix + '-ipv6') -DisplayName 'SNA commercial IPv6 isolation' -Direction Inbound -Action Block -InterfaceAlias $Interface -RemoteAddress '::/0' -Profile Any | Out-Null
+    New-NetFirewallRule -Name ($rulePrefix + '-ipv6-forward') -DisplayName 'SNA commercial IPv6 forward isolation' -Direction Outbound -Action Block -InterfaceAlias $EgressInterface -LocalAddress '::/0' -RemoteAddress '::/0' -Profile Any | Out-Null
 }
 
 if ($Action -eq 'EnsureGateway') { Ensure-Gateway }
 elseif ($Action -eq 'ApplyPeer') { Apply-PeerRules }
 elseif ($Action -eq 'RemovePeer') { Remove-PeerRules }
+elseif ($Action -eq 'QuarantinePeer') { Apply-PeerRules }

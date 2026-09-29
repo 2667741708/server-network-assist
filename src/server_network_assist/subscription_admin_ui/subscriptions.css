@@ -1,0 +1,59 @@
+/* BEGIN SNA SMOOTH INTERACTIONS (generated from frontend/shared) */
+/* Existing Tabler / Framework7 tokens and controls continue to supply the UI. */
+button:not(:disabled),summary,[role="button"] { touch-action: manipulation; }
+button:not(:disabled):active { filter: brightness(.94); }
+button.sna-busy { position: relative; }
+button.sna-busy::after {
+  content: ""; display: inline-block; width: .7em; height: .7em;
+  margin-inline-start: .5em; border: 2px solid currentColor;
+  border-inline-end-color: transparent; border-radius: 50%;
+  animation: sna-pending-spin .7s linear infinite; vertical-align: -.05em;
+}
+@keyframes sna-pending-spin { to { transform: rotate(360deg); } }
+.plan-panel,.plan { view-transition-name: sna-plan; }
+::view-transition-old(sna-plan) {
+  animation: sna-view-out 100ms ease-out both;
+}
+::view-transition-new(sna-plan) {
+  animation: sna-view-in 140ms cubic-bezier(.2,.7,.2,1) both;
+}
+::view-transition { pointer-events: none; }
+@keyframes sna-view-out { to { opacity: 0; } }
+@keyframes sna-view-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  button.sna-busy::after { animation: none; }
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+/* END SNA SMOOTH INTERACTIONS */
+/* Tabler 1.5.1 supplies visual tokens and components. These are business layout
+   and complete long-text readability adaptations only. */
+body{font-family:var(--tblr-font-sans-serif),"Microsoft YaHei",sans-serif}
+main,.page-wrapper{min-width:0}.navbar-brand{white-space:normal}.page-header{margin-top:1.5rem}
+*[hidden]{display:none!important}
+.heading,.action-group{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}.heading{justify-content:space-between}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:1rem}
+.filter-grid{display:grid;grid-template-columns:minmax(0,2fr) repeat(2,minmax(0,1fr));gap:1rem}
+.form-label{display:block;margin-bottom:1rem}.form-label input,.form-label select{font-weight:400;margin-top:.5rem}
+.source{display:flex;align-items:flex-start;gap:.75rem;padding-left:0;margin:1rem 0;min-width:0}.source .form-check-input{float:none;margin:.2rem 0 0;flex-shrink:0;position:static}.source span{min-width:0}
+.form-fieldset{margin-bottom:1.25rem}.form-fieldset legend{float:none;width:auto;font-size:1rem;font-weight:600;margin-bottom:.75rem}
+.business-row{padding:1rem 0;border-bottom:1px solid var(--tblr-border-color)}.business-row:first-child{padding-top:0}.business-row:last-child{border-bottom:0;padding-bottom:0}
+.nav-pills{gap:.5rem}.nav-pills .nav-link{white-space:normal}.login-card{max-width:520px}
+p,.business-row,.card-title,.page-title,.source span,legend,label,.text-wrap-anywhere{overflow-wrap:anywhere}.card-title{min-width:0}.card-header{gap:.75rem;flex-wrap:wrap}
+#message:empty,#generation-status:empty,#service-status:empty,#customer-action-status:empty{display:none}
+#message,#proxy-status,#expiry{white-space:pre-wrap}
+.source span,.business-row p{white-space:pre-wrap}
+#sources,#egress-sources,#egress-grants{max-height:480px;overflow:auto}
+#subscription-url{white-space:pre-wrap;overflow-wrap:anywhere;resize:vertical;min-height:120px}
+#result,#service-form,#service-detail,#customer-subscription-form,#egress-form{scroll-margin-top:1rem}
+button.btn{white-space:normal;max-width:100%}button:disabled{cursor:not-allowed}
+:focus-visible{outline:2px solid var(--tblr-primary);outline-offset:3px}
+.address-dialog{width:min(640px,calc(100% - 2rem));max-height:calc(100dvh - 2rem);padding:0;border:1px solid var(--tblr-border-color);border-radius:var(--tblr-border-radius);background:var(--tblr-bg-surface);color:var(--tblr-body-color);overflow:auto;overscroll-behavior:contain}
+.address-dialog::backdrop{background:rgba(0,0,0,.45)}
+.address-dialog .modal-header{position:sticky;top:0;background:var(--tblr-bg-surface);z-index:1;gap:1rem;display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem}
+.address-dialog .modal-body{padding:1.5rem}.address-dialog #result-title{display:none}
+.address-dialog .modal-title{overflow-wrap:anywhere}.address-dialog .btn-close{flex-shrink:0}
+.address-dialog .card{border:0;box-shadow:none;padding:0;margin:0!important}
+#dashboard-rows details p{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:767px){.filter-grid{grid-template-columns:1fr}.page-header .row{row-gap:1rem}.card-body{padding:1rem}.card-header{padding:1rem}.container-xl{padding-left:1rem;padding-right:1rem}.navbar .container-xl{gap:.5rem}.navbar-brand{font-size:1rem}.action-group .btn{flex:1 1 auto}}

@@ -15,6 +15,7 @@ import re
 import secrets
 import shlex
 import time
+from .route_diagnostics import routing_evidence, return_target
 
 
 HELPER = "/usr/local/sbin/server-network-assist-helper"
@@ -50,8 +51,16 @@ PROBE_SCRIPT = r'''set -u
 os="$(uname -s 2>/dev/null || printf unknown)"
 host="$(hostname 2>/dev/null || printf unknown)"
 route="$(ip -4 route show default 2>/dev/null | head -n 1 || true)"
+public_route="$(ip -4 route get 1.1.1.1 2>/dev/null | head -n 1 || true)"
+return_route=""
+if test -n "${SNA_RETURN_TARGET:-}"; then
+  return_route="$(ip -4 route get "$SNA_RETURN_TARGET" 2>/dev/null | head -n 1 || true)"
+fi
+printf 'public_route=%s\nreturn_route=%s\nroutes_json=' "$public_route" "$return_route"
+ip -j -4 route show table all 2>/dev/null | base64 -w 0
+printf '\n'
 dns=0
-getent ahostsv4 connectivitycheck.gstatic.com >/dev/null 2>&1 && dns=1
+timeout 4 getent ahostsv4 connectivitycheck.gstatic.com >/dev/null 2>&1 && dns=1
 http=000
 if command -v curl >/dev/null 2>&1; then
   http="$(curl --noproxy '*' -L -sS -o /dev/null -w '%{http_code}' --connect-timeout 4 --max-time 8 https://connectivitycheck.gstatic.com/generate_204 2>/dev/null || printf 000)"
@@ -61,7 +70,7 @@ fi
 internet=0
 case "$http" in 200|204) internet=1;; esac
 printf 'os=%s\nhostname=%s\ndefault_route=%s\ndns=%s\nhttp_code=%s\ninternet=%s\n' "$os" "$host" "$route" "$dns" "$http" "$internet"
-if test -x /usr/local/sbin/server-network-assist-helper && assist_status="$(sudo -n /usr/local/sbin/server-network-assist-helper status 2>/dev/null)"; then
+if test -x /usr/local/sbin/server-network-assist-helper && assist_status="$(timeout 5 sudo -n /usr/local/sbin/server-network-assist-helper status 2>/dev/null)"; then
   printf 'helper=1\n'
   printf '%s\n' "$assist_status"
 else
@@ -74,7 +83,8 @@ def parse_probe(output: str, exit_status: int = 0) -> dict:
               "helper": False, "hostname": "", "os": "", "default_route": "",
               "http_code": "000", "assist": [], "system_internet": None,
               "proxy_enabled": False, "diagnosis": "",
-              "client_supported": False, "gateway_supported": False}
+              "client_supported": False, "gateway_supported": False,
+              "global_tunnels": [], "route_warnings": [], "public_route": "", "return_route": ""}
     if output.lstrip().startswith('{'):
         try:
             value = json.loads(output)
@@ -86,6 +96,15 @@ def parse_probe(output: str, exit_status: int = 0) -> dict:
         except (ValueError, TypeError):
             pass
     for line in output.splitlines():
+        if line.startswith('routes_json='):
+            try:
+                routes = json.loads(base64.b64decode(line.split('=', 1)[1]))
+                if not isinstance(routes, list) or any(not isinstance(r, dict) for r in routes):
+                    raise ValueError('invalid route evidence')
+                result.update(routing_evidence(routes, result['public_route'], result['return_route']))
+            except (ValueError, TypeError, KeyError):
+                result['route_warnings'] = ['无法读取路由证据，请重新探测。']
+            continue
         if line.startswith("assist_json="):
             try:
                 value = base64.urlsafe_b64decode(line.split("=", 1)[1] + "===")
@@ -105,8 +124,10 @@ def parse_probe(output: str, exit_status: int = 0) -> dict:
     return result
 
 
-def probe_command() -> str:
-    return "sh -lc " + shlex.quote(PROBE_SCRIPT)
+def probe_command(target='') -> str:
+    target = return_target(target)
+    prefix = 'SNA_RETURN_TARGET=' + shlex.quote(target) + ' ' if target else ''
+    return prefix + "sh -lc " + shlex.quote(PROBE_SCRIPT)
 
 
 def helper_command(action: str, payload: dict | None = None, *args: str, platform='linux') -> str:

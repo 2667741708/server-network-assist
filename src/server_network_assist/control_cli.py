@@ -5,6 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 import sys
+import time
 
 from .app import (State, clash_remote, network_disable_profile,
                   network_enable_profile, network_install_helper,
@@ -51,6 +52,31 @@ async def execute(state, args):
         return result
     if args.command == "profiles":
         return profiles
+    if args.command == 'node-create':
+        return state.control_plane.create_node(args.node, args.name)
+    if args.command == 'transport-create':
+        return state.control_plane.create_transport(
+            args.node, args.transport, kind=args.kind, access=args.access,
+            endpoints=args.endpoint, tunnel=args.tunnel)
+    if args.command == 'endpoint-create':
+        return state.control_plane.create_endpoint(args.node, args.transport, args.endpoint)
+    if args.command == 'egress-create':
+        return state.control_plane.create_egress(args.node, args.egress, kind=args.kind)
+    if args.command == "grant-ref-set":
+        reference = state.control_plane.set_grant_reference(
+            args.grant, args.node, args.egress, transport=args.transport,
+            priority=args.priority)
+        return {"reference": reference, "revision": state.control_plane.current_revision()}
+    if args.command == "grant-ref-remove":
+        state.control_plane.remove_grant_reference(args.grant)
+        return {"ok": True, "revision": state.control_plane.current_revision()}
+    if args.command == "directory-publish":
+        envelope = state.control_plane.publisher.publish(
+            now=int(time.time()), ttl=args.ttl or state.control_plane.directory_ttl,
+            output_path=state.data / 'node-directory.json')
+        return {"revision": envelope['payload']['revision'],
+                "expires_at": envelope['payload']['expires_at'],
+                "output": str(state.data / 'node-directory.json')}
     if args.command == "probe":
         selected = hosts if args.host == "all" else [resolve(hosts, args.host, "主机")]
         return await asyncio.gather(*(network_probe_host(state, host["id"]) for host in selected))
@@ -106,6 +132,34 @@ def parser():
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("hosts", help="列出主机及服务器/客户端角色")
     commands.add_parser("profiles", help="列出借网方案")
+    node = commands.add_parser('node-create', help='创建校园或 Cloud 逻辑节点')
+    node.add_argument('--node', required=True)
+    node.add_argument('--name', required=True)
+    transport = commands.add_parser('transport-create', help='创建节点传输及首个接入地址')
+    transport.add_argument('--node', required=True)
+    transport.add_argument('--transport', required=True)
+    transport.add_argument('--kind', choices=('wireguard', 'wss'), required=True)
+    transport.add_argument('--access', choices=('campus', 'campus_lan', 'hub', 'overlay', 'public'), required=True)
+    transport.add_argument('--endpoint', required=True)
+    transport.add_argument('--tunnel')
+    endpoint = commands.add_parser('endpoint-create', help='增加节点传输的备用接入地址')
+    endpoint.add_argument('--node', required=True)
+    endpoint.add_argument('--transport', required=True)
+    endpoint.add_argument('--endpoint', required=True)
+    egress = commands.add_parser('egress-create', help='创建节点上的物理或代理出口')
+    egress.add_argument('--node', required=True)
+    egress.add_argument('--egress', required=True)
+    egress.add_argument('--kind', required=True)
+    reference = commands.add_parser('grant-ref-set', help='把已存在的客户线路授权绑定到签名节点')
+    reference.add_argument('--grant', required=True)
+    reference.add_argument('--node', required=True)
+    reference.add_argument('--egress', action='append', required=True)
+    reference.add_argument('--transport')
+    reference.add_argument('--priority', type=int, default=100)
+    remove_reference = commands.add_parser('grant-ref-remove', help='移除客户线路逻辑节点授权')
+    remove_reference.add_argument('--grant', required=True)
+    publish = commands.add_parser('directory-publish', help='发布已签名的节点目录')
+    publish.add_argument('--ttl', type=int)
     probe = commands.add_parser("probe", help="探测一台或全部主机")
     probe.add_argument("--host", default="all", help="主机名称、ID 或 all")
     install = commands.add_parser("helper-install", help="安装远端网络辅助程序")

@@ -33,8 +33,10 @@ from .network_assist import (HELPER as NETWORK_HELPER, NetworkStore,
                              helper_command, parse_probe, probe_command,
                              detect_platform, windows_file_command, WINDOWS_HELPER)
 from .auth import hash_password, token_digest, verify_password
-from .client_store import ClientStore
+from .route_diagnostics import runtime_profiles, return_target
+from .client_store import ClientStore, ClientStoreError
 from .client_service_api import ClientServiceAPI
+from .control_plane import ControlPlaneService
 
 
 class State:
@@ -51,6 +53,7 @@ class State:
         self.browser_hosts = set()
         self.failed = {}
         self.operations = asyncio.Semaphore(8)
+        self.proxy_locks = {}
         self.network_changes = asyncio.Lock()
         self.origin = os.environ.get('PANEL_ORIGIN', '').rstrip('/')
         extra_origins = [value.strip().rstrip('/') for value in
@@ -83,6 +86,10 @@ class State:
                     id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
                     role TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
                     created_at INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS proxy_operations (
+                    id TEXT PRIMARY KEY, host_id TEXT NOT NULL, action TEXT NOT NULL,
+                    status TEXT NOT NULL, created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL);
             ''')
             columns = {row['name'] for row in db.execute('PRAGMA table_info(codex_sessions)')}
             for name, definition in (
@@ -94,7 +101,18 @@ class State:
             db.execute("UPDATE codex_sessions SET status='error', last_error='管理台重启，上一条消息已中止' WHERE status='running'")
             db.execute("UPDATE codex_messages SET status='error', content='管理台重启，上一条消息已中止' WHERE status='running'")
         self.network = NetworkStore(self)
+        self.network_probes = {}
         self.client_service = ClientStore(self.data / 'commercial-service.sqlite3')
+        from .client_access_log import ClientAccessLog
+        from .subscription_archive import SubscriptionArchive
+        self.client_access_log = ClientAccessLog(self.client_service)
+        self.subscription_archive = SubscriptionArchive(self.client_service, self.cipher)
+        directory_url = os.environ.get('SNA_DIRECTORY_URL', '').strip() or None
+        self.control_plane = ControlPlaneService(
+            self.client_service,
+            key_file=self.data / 'node-directory-signing.key',
+            directory_url=directory_url,
+        )
 
     @contextlib.contextmanager
     def connect(self):
@@ -135,6 +153,8 @@ class State:
         h['id'] = h['id'] or secrets.token_hex(8)
         if not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', h['id']):
             raise ValueError('主机标识无效')
+        if h['id'] == 'local-proxy':
+            raise ValueError('主机标识保留给控制服务本机')
         if not h['name'] or len(h['name']) > 160 or len(h['group']) > 80:
             raise ValueError('请填写主机名称（最多 160 字）')
         address = h['address']
@@ -153,6 +173,10 @@ class State:
         h['codex_enabled'] = bool(p.get('codex_enabled', True))
         h['browser_enabled'] = bool(p.get('browser_enabled', True))
         h['codex_workspace'] = str(p.get('codex_workspace', '')).strip()
+        h['proxy_profile'] = str(p.get('proxy_profile', 'auto')).strip() or 'auto'
+        if h['proxy_profile'] not in ('auto', 'system_mihomo', 'cloud_mihomo',
+                                      'user_mihomo', 'clash_verge'):
+            raise ValueError('代理配置类型无效')
         if len(h['codex_workspace']) > 1024 or any(value in h['codex_workspace'] for value in ('\x00', '\r', '\n')):
             raise ValueError('Codex 工作目录无效')
         if h['host_key']:
@@ -342,6 +366,7 @@ class State:
 
 
 STATE_KEY = web.AppKey("state", State)
+TUNNEL_PROBE_RUNNER_KEY = web.AppKey("tunnel_probe_runner", web.AppRunner)
 SESSION_KEY = web.RequestKey("session", dict)
 
 
@@ -394,7 +419,27 @@ def _remote_json(result):
     raise ValueError(('远端网络辅助程序不可用：' + detail)[:2000])
 
 
-async def network_probe_host(state, host_id):
+class ProxyActionRejected(ValueError):
+    """The helper returned a definitive policy/application rejection."""
+
+
+def _proxy_remote_json(result):
+    for line in reversed(result.stdout.splitlines()):
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and value.get('ok') is False:
+            message = str(value.get('error', ''))
+            if '安全停用' in message:
+                raise ProxyActionRejected('节点未通过地区验证，代理出口已安全停用')
+            raise ProxyActionRejected('服务器拒绝该节点或配置；请核对受管理策略组和出口状态')
+        if isinstance(value, dict) and value.get('ok') is True:
+            return value
+    return _remote_json(result)
+
+
+async def network_probe_host(state, host_id, target=''):
     host = state.host(host_id)
     if not host:
         raise ValueError('主机不存在')
@@ -412,7 +457,7 @@ async def network_probe_host(state, host_id):
                         with contextlib.suppress(Exception):
                             await sftp.remove(temporary)
             else:
-                result = await connection.run(probe_command(), timeout=20, check=False)
+                result = await connection.run(probe_command(target), timeout=20, check=False)
             try:
                 codex = await connection.run(_codex_prefix(platform) + 'codex --version', timeout=12, check=False)
                 codex_version = (codex.stdout or '').strip().splitlines()
@@ -645,12 +690,42 @@ async def _network_remote(state, host_id, action, payload=None, *args, timeout=6
 
 
 async def clash_remote(state, host_id, payload):
+    if host_id == 'local-proxy':
+        if os.name == 'nt':
+            raise ValueError('本机系统代理管理只支持 Linux 控制服务')
+        command = ['/usr/bin/sudo', '-n', '/usr/local/sbin/sna-proxy-agent']
+        remote_payload = {**payload, 'profile': 'system_mihomo'}
+        async with state.operations:
+            process = await asyncio.create_subprocess_exec(*command,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE)
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(
+                    json.dumps(remote_payload, ensure_ascii=False).encode()), timeout=18)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise ValueError('本机代理管理程序超时；请刷新实际状态') from None
+        result = type('ProxyResult', (), {'stdout': stdout.decode(errors='replace'),
+            'stderr': stderr.decode(errors='replace'), 'exit_status': process.returncode})()
+        return _proxy_remote_json(result).get('result', {})
     host = state.host(host_id)
     if not host:
         raise ValueError('主机不存在')
+    payload = {**payload, 'profile': host.get('proxy_profile', 'auto')}
     source = ROOT / 'clash_control.py'
     async with state.operations, ssh_route(state, host_id) as connection:
         platform = await detect_platform(connection)
+        if payload['profile'] in ('system_mihomo', 'cloud_mihomo'):
+            if platform != 'linux':
+                raise ValueError('系统代理配置只支持 Linux 目标机')
+            # This executable is installed root-owned. Never sudo a helper
+            # uploaded to a user-writable temporary directory.
+            result = await connection.run('/usr/bin/sudo -n /usr/local/sbin/sna-proxy-agent',
+                                          input=json.dumps(payload, ensure_ascii=False),
+                                          timeout=45, check=False)
+            value = _proxy_remote_json(result)
+            return value.get('result', {})
         async with connection.start_sftp_client() as sftp:
             home = await sftp.realpath('.')
             if platform == 'windows':
@@ -675,8 +750,33 @@ async def clash_remote(state, host_id, payload):
             finally:
                 with contextlib.suppress(Exception):
                     await sftp.remove(temporary)
-    value = _remote_json(result)
+    value = _proxy_remote_json(result)
     return value.get('result', {})
+
+
+def proxy_operation(state, operation_id, host_id=None, action=None, status=None):
+    """Persist the authoritative outcome before replying to a proxy mutation."""
+    now = int(time.time())
+    with state.connect() as db:
+        if host_id is not None:
+            db.execute('INSERT INTO proxy_operations VALUES (?,?,?,?,?,?)',
+                       (operation_id, host_id, action, status, now, now))
+        elif status is not None:
+            db.execute('UPDATE proxy_operations SET status=?,updated_at=? WHERE id=?',
+                       (status, now, operation_id))
+        row = db.execute('SELECT * FROM proxy_operations WHERE id=?',
+                         (operation_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def proxy_api_error(code, phase, message, *, retryable=False, operation=None, status=400):
+    payload = {'protocol_version': 1, 'error_code': code, 'component': 'proxy_fleet',
+               'phase': phase, 'error': message, 'retryable': retryable,
+               'next_action': '刷新主机状态和操作记录后重试' if retryable else '检查代理配置和节点状态',
+               'correlation_id': secrets.token_hex(12)}
+    if operation:
+        payload.update(operation_id=operation['id'], operation_status=operation['status'])
+    return web.json_response(payload, status=status)
 
 
 async def network_enable_profile(state, profile_id):
@@ -770,7 +870,7 @@ def current(state, request):
 
 def fresh(state, session):
     if state.recent.get(session['token_hash'], 0) < time.time() - 300:
-        raise web.HTTPForbidden(text='请先在设置中验证管理员密码（验证有效期 5 分钟）')
+        raise web.HTTPForbidden(text='请重新验证管理员密码（验证有效期 5 分钟）')
 
 
 def new_session(state, request, p):
@@ -793,9 +893,29 @@ def new_session(state, request, p):
 PUBLIC = {'/api/session', '/api/login', '/api/passkey/options', '/api/passkey/login'}
 
 
+def generate_subscription_from_request(service, payload):
+    """Keep web issuance on the same atomic, validated store path as the CLI."""
+    ids = payload.get('source_ids')
+    if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+        raise ValueError('源网选择无效')
+    modes = payload.get('egress_modes')
+    if modes is not None and (not isinstance(modes, list) or
+                              any(not isinstance(item, str) for item in modes)):
+        raise ValueError('出口选择无效')
+    access_mode = str(payload.get('access_mode') or ('wireguard' if ids else 'public_proxy'))
+    return service.generate_monthly_subscription(str(payload.get('name', '')),
+        payload.get('quota_gb'), ids, access_mode=access_mode,
+        group_id=payload.get('group_id') or None,
+        download_bps=payload.get('download_bps', 50000000),
+        upload_bps=payload.get('upload_bps', 10000000),
+        validity_days=payload.get('validity_days', 30),
+        egress_modes=modes)
+
+
 def create_app(data, key_file):
     state = State(data, key_file)
-    client_api = ClientServiceAPI(state.client_service)
+    client_api = ClientServiceAPI(state.client_service, control_plane=state.control_plane,
+                                  access_log=state.client_access_log)
 
     @web.middleware
     async def guard(request, handler):
@@ -825,6 +945,40 @@ def create_app(data, key_file):
     app = web.Application(middlewares=[guard], client_max_size=32768)
     app[STATE_KEY] = state
 
+    async def start_tunnel_probe(main_app):
+        address = os.environ.get('SNA_TUNNEL_PROBE_BIND') or os.environ.get('SNA_TUNNEL_PROBE_ADDRESS')
+        raw_addresses = os.environ.get('SNA_TUNNEL_PROBE_BIND_ADDRESSES', '')
+        additional = json.loads(raw_addresses) if raw_addresses else []
+        if not isinstance(additional, list) or any(not isinstance(item, str) for item in additional):
+            raise ValueError('源机隧道检测监听地址列表无效')
+        addresses = list(dict.fromkeys(([address] if address else []) + additional))
+        if not addresses:
+            return
+        for address in addresses:
+            candidate = ipaddress.ip_address(address)
+            if candidate.version != 4 or not candidate.is_private:
+                raise ValueError('源机隧道检测监听地址必须是私网 IPv4')
+        probe_app = web.Application(client_max_size=1024)
+        probe_app.router.add_post('/client/v1/tunnel-probe', client_api.handle_tunnel_probe)
+        runner = web.AppRunner(probe_app, access_log=None)
+        await runner.setup()
+        try:
+            for address in addresses:
+                site = web.TCPSite(runner, address, client_api._tunnel_probe_port())
+                await site.start()
+        except Exception:
+            await runner.cleanup()
+            raise
+        main_app[TUNNEL_PROBE_RUNNER_KEY] = runner
+
+    async def stop_tunnel_probe(main_app):
+        runner = main_app.get(TUNNEL_PROBE_RUNNER_KEY)
+        if runner is not None:
+            await runner.cleanup()
+
+    app.on_startup.append(start_tunnel_probe)
+    app.on_cleanup.append(stop_tunnel_probe)
+
     async def headers(request, response):
         response.headers.update({'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
             'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
@@ -840,19 +994,76 @@ def create_app(data, key_file):
                 'passkeys': state.passkey_allowed(request), 'secure': state.cookie_secure(request), 'version': '2.0'})
         if path == '/api/hosts':
             return web.json_response({'hosts': state.hosts()})
+        if path == '/api/proxy-fleet/hosts':
+            local = {'id': 'local-proxy', 'name': 'C201 控制服务本机',
+                     'address': '127.0.0.1', 'proxy_profile': 'system_mihomo',
+                     'local': True}
+            return web.json_response({'hosts': [local, *state.hosts()]})
         if path == '/api/credentials':
             return web.json_response({'credentials': state.credentials()})
         if path == '/api/network':
-            return web.json_response({'profiles': state.network.profiles()})
+            return web.json_response({'profiles': runtime_profiles(state.network.profiles(), state.network_probes)})
         if path == '/api/client-service':
-            return web.json_response({'plans': state.client_service.list_plans(),
+            presets = [value.strip() for value in os.environ.get('SNA_BASE_URL_PRESETS', '').split(',')
+                       if value.strip()] or ['http://10.20.32.13:9182', 'https://10.20.32.13:8443',
+                                             'https://whm12.art']
+            return web.json_response({'sources': state.client_service.list_sources(), 'plans': state.client_service.list_plans(),
+                'groups': state.client_service.list_groups(),
+                'issue_capabilities': {'version': 2, 'egress_modes': True,
+                    'custom_quota_gb': True, 'custom_validity_days': True,
+                    'unlimited_speed': True, 'public_proxy': True,
+                    'public_proxy_v2': True},
                 'customers': state.client_service.list_customers(),
                 'devices': state.client_service.list_devices(),
                 'grants': state.client_service.list_grants(),
-                'leases': state.client_service.list_leases()})
+                'leases': state.client_service.list_leases(),
+                'subscription_addresses': state.subscription_archive.statuses(),
+                'base_url_presets': presets})
+        if path == '/api/client-service/access-log':
+            def _int_or_none(raw):
+                if raw is None or raw == '':
+                    return None
+                return int(raw)
+            try:
+                value = await asyncio.to_thread(state.client_access_log.query,
+                    customer_id=request.query.get('customer_id') or None,
+                    device_id=request.query.get('device_id') or None,
+                    from_ts=_int_or_none(request.query.get('from')),
+                    to_ts=_int_or_none(request.query.get('to')),
+                    limit=_int_or_none(request.query.get('limit')) or 100,
+                    offset=_int_or_none(request.query.get('offset')) or 0)
+            except ValueError:
+                raise web.HTTPBadRequest(text='查询参数无效') from None
+            except ClientStoreError as exc:
+                raise web.HTTPBadRequest(text=str(exc)) from None
+            return web.json_response(value, headers={'Cache-Control': 'no-store'})
+        if path == '/api/control-plane/nodes':
+            return web.json_response({'revision': state.control_plane.current_revision(),
+                                      'nodes': state.control_plane.list_nodes(include_disabled=True)})
+        if path == '/api/control-plane/directory':
+            return web.json_response(state.control_plane.publisher.cached())
+        if path == '/api/control-plane/audit':
+            return web.json_response({'events': state.control_plane.list_audit_events(100)})
         if path == '/api/clash':
             return web.json_response(await clash_remote(
                 state, request.query.get('host_id', ''), {'action': 'status'}))
+        if path == '/api/proxy-fleet/status':
+            host_id = request.query.get('host_id', '')
+            try:
+                result = await clash_remote(state, host_id, {'action': 'proxy_status'})
+                return web.json_response(result)
+            except Exception:
+                return proxy_api_error('PROXY_STATUS_UNAVAILABLE', 'status',
+                    '无法读取服务器代理；请核对 SSH、配置权限与本机 Controller', retryable=True,
+                    status=503)
+        if path == '/api/proxy-fleet/operation':
+            operation_id = request.query.get('id', '')
+            if not re.fullmatch(r'[0-9a-f]{24}', operation_id):
+                raise ValueError('操作 ID 无效')
+            operation = proxy_operation(state, operation_id)
+            if not operation:
+                raise web.HTTPNotFound(text='代理操作不存在')
+            return web.json_response({'operation': operation})
         if path == '/api/codex/sessions':
             return web.json_response({'sessions': state.codex_sessions(request.query.get('host_id', ''))})
         if path == '/api/codex/session':
@@ -886,6 +1097,8 @@ def create_app(data, key_file):
             raise ValueError('请求必须为对象')
         path, session = request.path, request.get(SESSION_KEY)
         ip = request.remote or ''
+        if path.startswith('/api/control-plane/'):
+            fresh(state, session)
         if path == '/api/login':
             state.check_rate(ip)
             # Existing password/key hashes remain valid during migration.
@@ -914,6 +1127,82 @@ def create_app(data, key_file):
                 raise web.HTTPForbidden(text='管理员密码不正确')
             state.recent[session['token_hash']] = time.time()
             return web.json_response({'ok': True})
+        if path == '/api/control-plane/node/save':
+            value = p.get('node') if isinstance(p.get('node'), dict) else p
+            node_id = str(value.get('node_id', value.get('id', '')))
+            if node_id in {row['node_id'] for row in state.control_plane.list_nodes(include_disabled=True)}:
+                result = state.control_plane.update_node(node_id, value)
+            else:
+                result = state.control_plane.create_node(value)
+            return web.json_response({'node': result, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/node/delete':
+            state.control_plane.delete_node(str(p.get('node_id', p.get('id', ''))))
+            return web.json_response({'ok': True, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/transport/save':
+            value = p.get('transport') if isinstance(p.get('transport'), dict) else p
+            node_id, transport_id = str(p.get('node_id', value.get('node_id', ''))), str(value.get('id', value.get('transport_id', '')))
+            node = state.control_plane.get_node(node_id)
+            if transport_id in {row['id'] for row in node['transports']}:
+                result = state.control_plane.update_transport(node_id, transport_id, value)
+            else:
+                result = state.control_plane.create_transport(node_id, value)
+            return web.json_response({'node': result, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/transport/delete':
+            state.control_plane.delete_transport(str(p.get('node_id', '')), str(p.get('transport_id', p.get('id', ''))))
+            return web.json_response({'ok': True, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/endpoint/save':
+            node_id, transport_id = str(p.get('node_id', '')), str(p.get('transport_id', ''))
+            value = p.get('endpoint') if isinstance(p.get('endpoint'), dict) else p
+            endpoint_id = value.get('id', value.get('endpoint_id'))
+            node = state.control_plane.get_node(node_id)
+            transport = next((row for row in node['transports'] if row['id'] == transport_id), None)
+            if transport is None:
+                raise ValueError('节点传输不存在')
+            if endpoint_id and endpoint_id in {row.get('endpoint_id') for row in transport['endpoints']}:
+                result = state.control_plane.update_endpoint(node_id, transport_id, endpoint_id, value)
+            else:
+                result = state.control_plane.create_endpoint(node_id, transport_id, value)
+            return web.json_response({'node': result, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/endpoint/delete':
+            state.control_plane.delete_endpoint(str(p.get('node_id', '')), str(p.get('transport_id', '')), str(p.get('endpoint_id', p.get('id', ''))))
+            return web.json_response({'ok': True, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/egress/save':
+            value = p.get('egress') if isinstance(p.get('egress'), dict) else p
+            node_id, egress_id = str(p.get('node_id', value.get('node_id', ''))), str(value.get('id', value.get('egress_id', '')))
+            node = state.control_plane.get_node(node_id)
+            if egress_id in {row['id'] for row in node['egress']}:
+                result = state.control_plane.update_egress(node_id, egress_id, value)
+            else:
+                result = state.control_plane.create_egress(node_id, value)
+            return web.json_response({'node': result, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/egress/delete':
+            state.control_plane.delete_egress(str(p.get('node_id', '')), str(p.get('egress_id', p.get('id', ''))))
+            return web.json_response({'ok': True, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/grant-reference/save':
+            result = state.control_plane.set_grant_reference(
+                str(p.get('grant_id', '')), str(p.get('node_id', '')), p.get('egress', p.get('egresses', [])),
+                transport=p.get('transport', p.get('transport_id')), priority=p.get('priority', 100))
+            return web.json_response({'reference': result, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/grant-reference/delete':
+            state.control_plane.remove_grant_reference(str(p.get('grant_id', '')))
+            return web.json_response({'ok': True, 'revision': state.control_plane.current_revision()})
+        if path == '/api/control-plane/publish':
+            envelope = state.control_plane.publisher.publish(
+                now=int(time.time()), ttl=int(p.get('ttl', state.control_plane.directory_ttl)),
+                output_path=state.data / 'node-directory.json')
+            return web.json_response(envelope)
+        if path == '/api/control-plane/device/revoke':
+            state.control_plane.revoke_device(str(p.get('device_id', p.get('id', ''))))
+            return web.json_response({'ok': True})
+        if path == '/api/control-plane/customer/tokens/revoke':
+            count = state.control_plane.revoke_enrollment_tokens(str(p.get('customer_id', p.get('id', ''))))
+            return web.json_response({'ok': True, 'revoked': count})
+        if path == '/api/control-plane/device/rotate':
+            rotated = state.control_plane.rotate_device_credentials(
+                str(p.get('device_id', p.get('id', ''))), str(p.get('signing_public_key', '')),
+                wireguard_public_key=p.get('wireguard_public_key'))
+            return web.json_response({'device_id': rotated['id'], 'public_key': rotated['public_key'],
+                                      'wireguard_public_key': rotated['wireguard_public_key']})
         if path == '/api/run':
             result = await asyncio.to_thread(state.legacy.run, p.get('server'), p.get('action'))
             state.audit(p.get('action'), p.get('server'))
@@ -984,6 +1273,68 @@ def create_app(data, key_file):
             result = await clash_remote(state, host_id, p)
             state.audit('clash_' + action, state.host(host_id)['name'])
             return web.json_response(result)
+        if path == '/api/proxy-fleet/action':
+            host_id = str(p.get('host_id', ''))
+            action = str(p.get('action', ''))
+            if host_id != 'local-proxy' and not state.host(host_id):
+                return proxy_api_error('HOST_UNKNOWN', 'input', '主机不存在')
+            if action == 'profile':
+                if host_id == 'local-proxy':
+                    return proxy_api_error('PROFILE_FIXED', 'profile',
+                                           '控制服务本机使用固定的系统 Mihomo 配置')
+                try:
+                    fresh(state, session)
+                    host = state.save_host({**state.host(host_id),
+                                            'proxy_profile': p.get('profile')})
+                    state.audit('proxy_profile_changed', host_id)
+                    return web.json_response({'host': host})
+                except (ValueError, web.HTTPForbidden):
+                    return proxy_api_error('PROFILE_REJECTED', 'profile',
+                                           '代理配置类型无效或管理员验证已过期')
+            if action not in ('test', 'egress', 'select'):
+                return proxy_api_error('ACTION_INVALID', 'input', '代理操作无效')
+            operation = None
+            if action == 'select':
+                try:
+                    fresh(state, session)
+                except (ValueError, web.HTTPForbidden):
+                    return proxy_api_error('REAUTH_REQUIRED', 'authorization',
+                                           '切换节点需要重新验证管理员身份')
+                operation_id = secrets.token_hex(12)
+                operation = proxy_operation(state, operation_id, host_id,
+                                            'select', 'started')
+            command = {'test': 'proxy_test', 'egress': 'proxy_egress',
+                       'select': 'proxy_select'}[action]
+            remote_payload = {'action': command}
+            if action in ('test', 'select'):
+                remote_payload['group'] = p.get('group')
+            if action == 'test':
+                remote_payload['names'] = p.get('names')
+            if action == 'select':
+                remote_payload['name'] = p.get('name')
+                remote_payload['automatic'] = p.get('automatic') is True
+            try:
+                if action == 'select':
+                    lock = state.proxy_locks.setdefault(host_id, asyncio.Lock())
+                    async with lock:
+                        result = await clash_remote(state, host_id, remote_payload)
+                else:
+                    result = await clash_remote(state, host_id, remote_payload)
+            except ProxyActionRejected as exc:
+                if operation:
+                    operation = proxy_operation(state, operation['id'], status='rejected')
+                return proxy_api_error('PROXY_POLICY_REJECTED', action, str(exc),
+                                       operation=operation, status=409)
+            except Exception:
+                if operation:
+                    operation = proxy_operation(state, operation['id'], status='unknown')
+                return proxy_api_error('PROXY_OPERATION_UNCONFIRMED', action,
+                    '无法确认代理操作结果；请先刷新状态，不要重复提交',
+                    retryable=True, operation=operation, status=503)
+            if operation:
+                operation = proxy_operation(state, operation['id'], status='succeeded')
+                state.audit('proxy_node_selected', host_id)
+            return web.json_response({'result': result, 'operation': operation})
         if path == '/api/codex/cancel':
             fresh(state, session)
             session_id = str(p.get('id', ''))
@@ -996,9 +1347,15 @@ def create_app(data, key_file):
             ids = p.get('ids') or [h['id'] for h in state.hosts()]
             if not isinstance(ids, list) or len(ids) > 64:
                 raise ValueError('探测主机列表无效')
-            results = await asyncio.gather(*(network_probe_host(state, str(value)) for value in ids))
+            target = return_target(p.get('return_target', ''))
+            results = await asyncio.gather(*(network_probe_host(state, str(value), target) for value in ids))
+            checked_at = int(time.time())
+            for result in results:
+                result['checked_at'] = checked_at
+                state.network_probes[result['id']] = result
             state.audit('network_probe', f'{len(results)} hosts')
-            return web.json_response({'results': results, 'checked_at': int(time.time())})
+            return web.json_response({'results': results, 'checked_at': checked_at,
+                                     'profiles': runtime_profiles(state.network.profiles(), state.network_probes)})
         fresh(state, session)
         if path == '/api/network/helper/install':
             ids = p.get('ids', [])
@@ -1028,7 +1385,44 @@ def create_app(data, key_file):
         if path == '/api/client-service/action':
             fresh(state, session)
             action, object_id = str(p.get('action', '')), str(p.get('id', ''))
-            if action == 'customer-enable':
+            if action == 'source-save':
+                result = state.client_service.save_source(p.get('source') or {})
+                state.audit('client_source_saved', result['id'])
+                return web.json_response({'source': result})
+            elif action == 'group-create':
+                result = state.client_service.create_group(str(p.get('name', '')))
+                state.audit('client_group_created', result['id'])
+                return web.json_response({'group': result})
+            elif action == 'customer-group':
+                result = state.client_service.set_customer_group(object_id, p.get('group_id') or None)
+                state.audit('client_customer_group_changed', object_id)
+                return web.json_response({'customer': result})
+            elif action == 'subscription-generate':
+                result = state.subscription_archive.generate(p)
+                state.audit('client_subscription_generated', result['customer_id'])
+                return web.json_response(result, headers={'Cache-Control': 'no-store'})
+            elif action == 'subscription-generate-batch':
+                result = await asyncio.to_thread(state.subscription_archive.generate_batch, p)
+                state.audit('client_subscription_batch_generated', f"{result['succeeded']} of {len(result['results'])}")
+                return web.json_response(result, headers={'Cache-Control': 'no-store'})
+            elif action == 'subscription-view':
+                result = await asyncio.to_thread(state.subscription_archive.view, object_id)
+                state.audit('client_subscription_address_viewed', object_id)
+                return web.json_response({'url': result}, headers={'Cache-Control': 'no-store'})
+            elif action == 'subscription-reissue':
+                result = await asyncio.to_thread(state.subscription_archive.reissue,
+                                                 object_id, p.get('base_url', ''))
+                state.audit('client_subscription_reissued', object_id)
+                return web.json_response(result, headers={'Cache-Control': 'no-store'})
+            elif action == 'subscription-address-expire':
+                result = await asyncio.to_thread(state.subscription_archive.expire, object_id)
+                state.audit('client_subscription_address_expired', object_id)
+                return web.json_response(result, headers={'Cache-Control': 'no-store'})
+            elif action == 'subscription-address-restore':
+                result = await asyncio.to_thread(state.subscription_archive.restore, object_id)
+                state.audit('client_subscription_address_restored', object_id)
+                return web.json_response(result, headers={'Cache-Control': 'no-store'})
+            elif action == 'customer-enable':
                 state.client_service.set_customer_enabled(object_id, bool(p.get('enabled')))
             elif action == 'device-enable':
                 state.client_service.set_device_enabled(object_id, bool(p.get('enabled')))
@@ -1037,7 +1431,7 @@ def create_app(data, key_file):
             elif action == 'lease-revoke':
                 state.client_service.revoke('lease', object_id)
             elif action == 'enrollment-token':
-                token = state.client_service.create_enrollment_token(object_id, ttl=int(p.get('ttl', 900)))
+                token = state.control_plane.create_enrollment_token(object_id, ttl=int(p.get('ttl', 900)))
                 state.audit('client_enrollment_token_created', object_id)
                 return web.json_response({'token': token})
             else:

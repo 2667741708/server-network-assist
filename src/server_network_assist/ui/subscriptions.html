@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>源网订阅管理</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="stylesheet" href="tabler.min.css"/>
+<link rel="stylesheet" href="subscriptions.css"/>
+</head>
+<body>
+<div class="page">
+<header class="navbar navbar-expand-md d-print-none">
+  <div class="container-xl">
+    <a class="navbar-brand">源网订阅管理</a>
+    <div class="navbar-nav flex-row order-md-last ms-auto">
+      <button id="logout" class="btn btn-outline-secondary btn-sm" hidden>退出登录</button>
+    </div>
+  </div>
+</header>
+<div class="page-wrapper"><main class="container-xl">
+<div class="page-header">
+  <div class="row align-items-center"><div class="col">
+    <div class="page-pretitle">C201-4090 · 商业源网</div>
+    <h1 class="page-title">源网订阅管理</h1>
+    <p class="text-secondary mt-2 mb-0">管理客户授权、订阅地址与访问记录；与客户端共用实际服务数据库。</p>
+  </div></div>
+</div>
+<p id="message" class="alert alert-info mt-3" role="status" aria-live="polite" hidden></p>
+
+<div id="login-card" class="card card-body mb-4">
+  <h3 class="card-title mb-3">管理员登录</h3>
+  <form id="login-form" autocomplete="on">
+    <div class="row g-3 align-items-end">
+      <div class="col-auto"><label class="form-label">用户名
+        <input class="form-control" name="username" value="admin" autocomplete="username" required></label></div>
+      <div class="col-auto"><label class="form-label">密码
+        <input class="form-control" name="password" type="password" autocomplete="current-password"></label></div>
+      <div class="col-auto"><label class="form-label">或登录密钥
+        <input class="form-control" name="key" type="password" autocomplete="off"
+               placeholder="与密码二选一"></label></div>
+      <div class="col-auto"><label class="form-check">
+        <input class="form-check-input" name="remember" type="checkbox">
+        <span class="form-check-label">保持登录（30 天）</span></label></div>
+      <div class="col-auto"><button class="btn btn-primary" type="submit">登录源网管理端</button></div>
+    </div>
+    <p class="text-secondary mt-2 mb-0">密码只用于本次会话验证，不会保存。不勾选保持登录时，会话 8 小时后过期。</p>
+  </form>
+</div>
+
+<div id="workspace" hidden>
+<div class="card card-body mb-4">
+  <h3 class="card-title mb-3">生成订阅地址</h3>
+  <form id="generate-form">
+    <div class="row g-3">
+      <div class="col-12"><label class="form-label">客户名称
+        <input class="form-control" name="name" maxlength="120" required placeholder="例如：张三 宿舍A"></label></div>
+      <div class="col-md-8"><label class="form-label">订阅服务地址（客户机开户入口）
+        <input class="form-control" name="base_url" list="base-url-presets" type="url" required
+               value="http://10.20.32.13:9182"></label></div>
+      <div class="col-md-4"><label class="form-label">服务有效期
+        <select class="form-select" name="validity_days">
+          <option value="30" selected>30 天</option><option value="180">180 天</option>
+          <option value="365">365 天</option><option value="custom">自定义天数</option>
+        </select></label></div>
+      <div class="col-md-4" id="validity-custom-wrap" hidden><label class="form-label">自定义天数（1–3650）
+        <input class="form-control" name="validity_custom" type="number" min="1" max="3650"></label></div>
+      <div class="col-md-4"><label class="form-label">流量额度
+        <select class="form-select" name="quota">
+          <option value="10" selected>10 GB</option><option value="50">50 GB</option>
+          <option value="100">100 GB</option><option value="unlimited">不限流量</option>
+        </select></label></div>
+      <div class="col-md-4"><label class="form-label">下行 Mbps
+        <input class="form-control" name="download" type="number" min="0.001" step="0.001" value="50"></label></div>
+      <div class="col-md-4"><label class="form-label">上行 Mbps
+        <input class="form-control" name="upload" type="number" min="0.001" step="0.001" value="10"></label></div>
+      <div class="col-md-4 d-flex align-items-end"><label class="form-check form-switch">
+        <input class="form-check-input" name="unlimited_speed" type="checkbox">
+        <span class="form-check-label">不限速</span></label></div>
+    </div>
+    <fieldset class="form-fieldset mt-3"><legend>源网与出口</legend>
+      <div id="sources" class="row g-2"></div>
+      <label class="form-check mt-2">
+        <input class="form-check-input" name="dual_egress" type="checkbox">
+        <span class="form-check-label">同时签发“源机代理”出口（不勾选则只签发物理宽带出口）</span></label>
+    </fieldset>
+    <button class="btn btn-primary mt-3" type="submit">生成订阅地址</button>
+    <p id="generation-status" role="status" aria-live="polite" class="mb-0 mt-2"></p>
+  </form>
+</div>
+
+<div class="card card-body mb-4">
+  <h3 class="card-title mb-3">批量签发订阅地址</h3>
+  <form id="batch-form">
+    <div class="row g-3">
+      <div class="col-md-6"><label class="form-label">客户名称（每行一个，最多 100 个）
+        <textarea class="form-control" name="names" rows="8"
+                  placeholder="张三 宿舍A&#10;李四 实验室B"></textarea></label></div>
+      <div class="col-md-6">
+        <div class="row g-3">
+          <div class="col-12"><label class="form-label">订阅服务地址
+            <input class="form-control" name="base_url" list="base-url-presets" type="url" required
+                   value="http://10.20.32.13:9182"></label></div>
+          <div class="col-md-6"><label class="form-label">有效期
+            <select class="form-select" name="validity_days">
+              <option value="30" selected>30 天</option><option value="180">180 天</option>
+              <option value="365">365 天</option>
+            </select></label></div>
+          <div class="col-md-6"><label class="form-label">流量额度
+            <select class="form-select" name="quota">
+              <option value="10" selected>10 GB</option><option value="50">50 GB</option>
+              <option value="100">100 GB</option><option value="unlimited">不限流量</option>
+            </select></label></div>
+          <div class="col-md-6"><label class="form-label">下行 Mbps
+            <input class="form-control" name="download" type="number" min="0.001" step="0.001" value="50"></label></div>
+          <div class="col-md-6"><label class="form-label">上行 Mbps
+            <input class="form-control" name="upload" type="number" min="0.001" step="0.001" value="10"></label></div>
+          <div class="col-12"><label class="form-check">
+            <input class="form-check-input" name="dual_egress" type="checkbox">
+            <span class="form-check-label">同时签发“源机代理”出口</span></label></div>
+        </div>
+      </div>
+    </div>
+    <fieldset class="form-fieldset mt-3"><legend>源网</legend>
+      <div id="batch-sources" class="row g-2"></div>
+    </fieldset>
+    <button class="btn btn-primary mt-3" type="submit">批量生成</button>
+    <p id="batch-status" role="status" aria-live="polite" class="mb-0 mt-2"></p>
+    <div id="batch-results" class="mt-3" hidden>
+      <div class="d-flex gap-2 mb-2">
+        <button id="batch-copy" class="btn btn-outline-secondary btn-sm" type="button">复制全部地址（文本）</button>
+        <button id="batch-export" class="btn btn-outline-secondary btn-sm" type="button">导出结果 CSV</button>
+      </div>
+      <div class="table-responsive"><table class="table table-vcenter card-table">
+        <thead><tr><th>客户名称</th><th>结果</th><th>客户编号 / 地址或错误</th></tr></thead>
+        <tbody id="batch-rows"></tbody></table></div>
+    </div>
+  </form>
+</div>
+
+<div class="card card-body mb-4">
+  <div class="heading mb-3"><h3 class="card-title mb-0">客户管理</h3>
+    <button id="customers-refresh" class="btn btn-outline-secondary btn-sm ms-auto" type="button">刷新数据</button></div>
+  <div class="table-responsive" tabindex="0" role="region" aria-label="客户列表，可横向滚动">
+    <table class="table table-vcenter card-table">
+      <thead><tr><th>客户 / 状态</th><th>地址状态</th><th>设备 / 线路</th><th>管理</th></tr></thead>
+      <tbody id="customers-rows"></tbody>
+    </table>
+  </div>
+  <div class="card-footer text-secondary d-flex gap-3 flex-wrap align-items-center">
+    <span>地址状态：ready 可用 · used 已兑换 · expired 已失效。销毁只针对未兑换地址；已兑换地址的历史不会被删除。</span>
+    <label class="form-label mb-0 d-flex align-items-center gap-2">补发开户入口
+      <input class="form-control form-control-sm" id="reissue-base" list="base-url-presets" type="url"
+             value="http://10.20.32.13:9182" style="width: 22rem"></label>
+  </div>
+</div>
+
+<div class="card card-body mb-4">
+  <h3 class="card-title mb-3">设备访问记录</h3>
+  <div class="row g-3 mb-2">
+    <div class="col-md-3"><label class="form-label">客户编号
+      <input class="form-control" id="access-customer" placeholder="cus_…"></label></div>
+    <div class="col-md-3"><label class="form-label">设备编号
+      <input class="form-control" id="access-device" placeholder="dev_…"></label></div>
+    <div class="col-md-2"><label class="form-label">起始时间
+      <input class="form-control" id="access-from" type="datetime-local"></label></div>
+    <div class="col-md-2"><label class="form-label">结束时间
+      <input class="form-control" id="access-to" type="datetime-local"></label></div>
+    <div class="col-md-2 d-flex align-items-end"><button id="access-query" class="btn btn-primary" type="button">查询</button></div>
+  </div>
+  <div class="table-responsive" tabindex="0" role="region" aria-label="访问记录，可横向滚动">
+    <table class="table table-vcenter card-table">
+      <thead><tr><th>时间</th><th>客户</th><th>设备</th><th>来源 IP</th><th>方法</th><th>路径</th></tr></thead>
+      <tbody id="access-rows"></tbody>
+    </table>
+  </div>
+  <div class="d-flex align-items-center mt-2">
+    <button id="access-prev" class="btn btn-outline-secondary btn-sm" type="button" disabled>上一页</button>
+    <span id="access-count" class="text-secondary mx-3"></span>
+    <button id="access-next" class="btn btn-outline-secondary btn-sm" type="button" disabled>下一页</button>
+  </div>
+  <div class="card-footer text-secondary">记录经设备签名认证的客户端 API 访问（开户/订阅/租约/用量上报）。经反向代理访问时，来源 IP 显示为代理网关地址；系统不信任可伪造的转发头。</div>
+</div>
+</div>
+</main></div></div>
+
+<datalist id="base-url-presets"></datalist>
+
+<dialog id="address-dialog" class="modal modal-blur" aria-labelledby="address-dialog-title">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title" id="address-dialog-title">客户订阅地址</h2>
+        <button id="address-dialog-close" class="btn-close" type="button" aria-label="关闭"></button></div>
+      <div class="modal-body">
+        <p id="address-status" class="text-secondary mb-2"></p>
+        <textarea id="subscription-url" class="form-control" rows="2" readonly></textarea>
+        <p id="address-expiry" class="text-secondary mt-2 mb-0"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="copy" class="btn btn-primary" type="button">复制地址</button>
+        <button id="address-dialog-cancel" class="btn btn-outline-secondary" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="reauth-dialog" class="modal modal-blur" aria-labelledby="reauth-dialog-title">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title" id="reauth-dialog-title">请重新验证管理员身份</h2></div>
+      <div class="modal-body">
+        <p class="text-secondary">操作需要近期验证（5 分钟有效）。</p>
+        <form id="reauth-form" autocomplete="on">
+          <label class="form-label">用户名
+            <input class="form-control" name="username" value="admin" autocomplete="username" required></label>
+          <label class="form-label mt-2">密码
+            <input class="form-control" name="password" type="password" autocomplete="current-password"></label>
+          <label class="form-label mt-2">或登录密钥
+            <input class="form-control" name="key" type="password" autocomplete="off"></label>
+          <p id="reauth-status" class="text-danger mt-2 mb-0" role="status"></p>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button id="reauth-submit" class="btn btn-primary" type="button">验证并继续</button>
+        <button id="reauth-cancel" class="btn btn-outline-secondary" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script src="tabler.min.js"></script>
+<script src="subscriptions.js"></script>
+</body>
+</html>

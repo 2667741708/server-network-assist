@@ -1,0 +1,48 @@
+/* Shared elements have one visible owner in each snapshot. */
+@view-transition {
+  navigation: auto;
+}
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-group(*) {
+  animation-duration: 120ms;
+  animation-timing-function: ease-out;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+}
+[data-navigation-heading] {
+  view-transition-name: navigation-heading;
+}
+.navbar {
+  view-transition-name: navigation-shell;
+}
+#workspace-nav {
+  view-transition-name: navigation-tabs;
+}
+.customer-name[data-shared-customer] {
+  view-transition-name: var(--customer-transition);
+}
+[hidden] {
+  display: none !important;
+}
+.accordion-item-content {
+  transition-duration: 120ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+  .accordion-item-content {
+    transition: none !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}

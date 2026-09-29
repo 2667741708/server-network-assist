@@ -405,11 +405,47 @@ def client_proxy(state, enable):
             save_state(state['profile_id'], state)
 
 
+def assert_client_route_available(state):
+    """Reject another global tunnel before changing any routes or services.
+
+    Inspect every routing table: legacy policy routing can hide its default
+    route outside main. Management-only WireGuard links remain permitted.
+    """
+    links = json.loads(run(["ip", "-j", "-d", "link", "show"]).stdout)
+    tunnel_devices = {v["ifname"] for v in links
+                      if v.get("linkinfo", {}).get("info_kind") in
+                      ("wireguard", "tun", "tuntap", "tap", "ipip", "gre", "gretap")}
+    routes = json.loads(run(["ip", "-j", "-4", "route", "show", "table", "all"]).stdout)
+    conflicts = set()
+    segmented = {}
+    for route in routes:
+        dev = route.get("dev")
+        prefix = route.get("dst", "default")
+        if dev == state["interface"] or not dev:
+            continue
+        if dev in tunnel_devices and prefix not in ('default', '0.0.0.0/0'):
+            try:
+                segmented.setdefault(dev, []).append(ipaddress.ip_network(prefix))
+            except ValueError:
+                pass
+        if prefix in ("0.0.0.0/1", "128.0.0.0/1") or (
+                prefix in ("default", "0.0.0.0/0") and dev in tunnel_devices):
+            conflicts.add(f"{dev} ({prefix}, table {route.get('table', 'main')})")
+    for dev, networks in segmented.items():
+        if sum(n.num_addresses for n in ipaddress.collapse_addresses(networks)) >= 2 ** 31:
+            conflicts.add(f"{dev} (segmented public routes)")
+    if conflicts:
+        raise ValueError("Another full-tunnel route is active; disable its borrowing mode first: "
+                         + "; ".join(sorted(conflicts)))
+
+
 def enable(profile_id, failsafe=0):
     state = load_state(profile_id)
     if not state:
         raise ValueError("profile is not configured")
     iface = valid_iface(state["interface"])
+    if state['role'] == 'client':
+        assert_client_route_available(state)
     if state['role'] == 'gateway' and state.get('proxy_mode') == 'share' and not proxy_ok(state):
         raise ValueError('source HTTP proxy verification failed')
     try:
@@ -531,6 +567,15 @@ def watch(iface):
             break
     if not match or not match.get("desired"):
         return
+    if match['role'] == 'client':
+        try:
+            assert_client_route_available(match)
+        except ValueError as exc:
+            disable(match['profile_id'], suspended=True)
+            stopped = load_state(match['profile_id'])
+            stopped['last_error'] = str(exc)
+            save_state(match['profile_id'], stopped)
+            return
     if not Path("/sys/class/net", iface).exists():
         try:
             if match["role"] == "client":

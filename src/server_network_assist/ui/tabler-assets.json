@@ -1,0 +1,9 @@
+{
+  "version": "1.5.1",
+  "source": "https://registry.npmjs.org/@tabler/core/-/core-1.5.1.tgz",
+  "package_sha256": "4ba7509b13c53efe3c771b3da8056c400b5040894b023b98f9094c25325a3320",
+  "files": {
+    "tabler.min.css": "6aa5677e9cfc2620405bf97a98074ba43ff06a411cb35c5337acfb56d124c273",
+    "tabler.min.js": "d4c4c2768f166c308391e0cea44db593056f12b84a4eeef46d55e35ca46d6e60"
+  }
+}
