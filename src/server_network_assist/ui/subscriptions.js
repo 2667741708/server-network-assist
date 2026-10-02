@@ -12,6 +12,7 @@
   let pendingRetry = null;
   let reauthOpen = false;
   let snapshot = null;
+  let lastAddressResult = null;
   let accessPage = { limit: 50, offset: 0, total: 0 };
   const PRESET_FALLBACK = ['http://10.20.32.13:9182', 'https://10.20.32.13:8443', 'https://whm12.art'];
   const FRESH_TEXT = '请重新验证管理员密码';
@@ -27,6 +28,7 @@
       message('服务端没有返回完整订阅地址，请先核对客户列表，避免重复开户。');
       return;
     }
+    lastAddressResult = result;
     $('subscription-url').value = result.url;
     $('address-dialog-title').textContent = title;
     const status = (snapshot && snapshot.subscription_addresses && snapshot.subscription_addresses[result.customer_id]
@@ -68,7 +70,7 @@
     if (response.status === 401 || (response.status === 403 && value && typeof value === 'object' && String(value.error || '').includes(FRESH_TEXT))) {
       if (opts.noReauth) throw new Error(value && value.error ? value.error : '会话已过期');
       if (body !== undefined && !pendingRetry) {
-        pendingRetry = { path, body, options: { noReauth: true } };
+        pendingRetry = { path, body, options: { noReauth: true }, onResult: opts.onResult };
         openReauth();
       }
       throw new Error('需要重新验证身份');
@@ -116,6 +118,9 @@
       if (retry) {
         const value = await request(retry.path, retry.body, retry.options);
         message('身份已验证，操作已继续。');
+        // The replayed action already ran on the server; surface its result
+        // (e.g. a freshly issued address) instead of discarding it.
+        if (typeof retry.onResult === 'function') retry.onResult(value);
         return value;
       }
       await refresh();
@@ -271,6 +276,11 @@
     $('login-card').hidden = false;
   }
 
+  function generationDone(result) {
+    showAddress(result, '生成成功 · 您的订阅地址');
+    $('generation-status').textContent = '生成成功，完整地址已显示。';
+  }
+
   async function generate(event) {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -282,9 +292,8 @@
         quota_gb: form.get('quota') === 'unlimited' ? null : Number(form.get('quota')),
         download_bps: unlimitedSpeed ? null : inputSpeed(form.get('download')),
         upload_bps: unlimitedSpeed ? null : inputSpeed(form.get('upload')),
-        validity_days: validityDays(form), egress_modes: egressModes(form) });
-      showAddress(result, '生成成功 · 您的订阅地址');
-      $('generation-status').textContent = '生成成功，完整地址已显示。';
+        validity_days: validityDays(form), egress_modes: egressModes(form) }, generationDone);
+      generationDone(result);
       await refresh();
     } catch (error) {
       $('generation-status').textContent = '尚未生成：' + error.message;
@@ -292,13 +301,20 @@
     }
   }
 
-  async function run(body) {
+  async function run(body, onResult) {
     busy = true;
     try {
-      return await request('api/client-service/action', body);
+      return await request('api/client-service/action', body, { onResult });
     } finally {
       busy = false;
     }
+  }
+
+  function batchDone(result) {
+    renderBatchResults(result.results || []);
+    storeBatchResults(result.results || []);
+    $('batch-status').textContent = '完成：成功 ' + result.succeeded + ' · 失败 ' + result.failed;
+    $('batch-results').hidden = false;
   }
 
   async function batchGenerate(event) {
@@ -317,11 +333,8 @@
         quota_gb: form.get('quota') === 'unlimited' ? null : Number(form.get('quota')),
         download_bps: unlimitedSpeed ? null : inputSpeed(form.get('download')),
         upload_bps: unlimitedSpeed ? null : inputSpeed(form.get('upload')),
-        validity_days: validityDays(form), egress_modes: egressModes(form) });
-      renderBatchResults(result.results || []);
-      storeBatchResults(result.results || []);
-      $('batch-status').textContent = '完成：成功 ' + result.succeeded + ' · 失败 ' + result.failed;
-      $('batch-results').hidden = false;
+        validity_days: validityDays(form), egress_modes: egressModes(form) }, batchDone);
+      batchDone(result);
       await refresh();
     } catch (error) {
       $('batch-status').textContent = '批量签发失败：' + error.message;
@@ -374,6 +387,42 @@
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 5000);
   }
+  function selectAll(input) {
+    input.focus({ preventScroll: true });
+    input.select();
+  }
+  // navigator.clipboard exists only in a secure context. The campus (9182) and
+  // WireGuard (9180) admin entries are plain HTTP, so it is undefined there and
+  // the copy button could never work -- it just told the user to copy by hand.
+  // execCommand still works in those contexts, so use it as the fallback.
+  function copyViaExecCommand(text) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    area.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (error) { ok = false; }
+    document.body.removeChild(area);
+    return ok;
+  }
+  function copyText(text, input) {
+    const done = () => message('订阅地址已复制。');
+    const failed = () => {
+      // Leave the address selected so Ctrl+C still works by hand.
+      if (input) selectAll(input);
+      message('复制被浏览器拒绝，请手动复制已选中的地址。');
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, () => (copyViaExecCommand(text) ? done() : failed()));
+      return;
+    }
+    if (copyViaExecCommand(text)) done(); else failed();
+  }
   function storeBatchResults(results) {
     sessionStorage.setItem('batchResults', JSON.stringify(results));
   }
@@ -394,30 +443,34 @@
   }
 
   async function viewAddress(customer) {
+    const done = (result) => showAddress(result, '已保存的订阅地址 · ' + customer.display_name);
     try {
-      const result = await run({ action: 'subscription-view', id: customer.id });
-      showAddress(result, '已保存的订阅地址 · ' + customer.display_name);
+      const result = await run({ action: 'subscription-view', id: customer.id }, done);
+      done(result);
     } catch (error) { message(error.message); }
   }
   async function reissue(customer) {
+    const done = (result) => showAddress(result, '补发成功 · ' + customer.display_name);
     try {
-      const result = await run({ action: 'subscription-reissue', id: customer.id, base_url: $('reissue-base').value });
-      showAddress(result, '补发成功 · ' + customer.display_name);
+      const result = await run({ action: 'subscription-reissue', id: customer.id, base_url: $('reissue-base').value }, done);
+      done(result);
       await refresh();
     } catch (error) { message(error.message); }
   }
   async function restoreAddress(customer) {
+    const done = () => message('原开户地址已延长 24 小时（地址不变）。');
     try {
-      const result = await run({ action: 'subscription-address-restore', id: customer.id });
-      message('原开户地址已延长 24 小时（地址不变）。');
+      await run({ action: 'subscription-address-restore', id: customer.id }, done);
+      done();
       await refresh();
     } catch (error) { message(error.message); }
   }
   async function expireAddress(customer) {
     if (!window.confirm('确定销毁 ' + customer.display_name + ' 的未兑换开户地址？销毁后如需使用必须补发新地址。')) return;
+    const done = () => message('原开户地址已销毁；如需新地址可补发。');
     try {
-      await run({ action: 'subscription-address-expire', id: customer.id });
-      message('原开户地址已销毁；如需新地址可补发。');
+      await run({ action: 'subscription-address-expire', id: customer.id }, done);
+      done();
       await refresh();
     } catch (error) { message(error.message); }
   }
@@ -477,13 +530,18 @@
   $('access-next').onclick = () => { accessPage.offset += accessPage.limit; loadAccessLog(); };
   $('copy').onclick = () => {
     const url = $('subscription-url');
-    url.focus({ preventScroll: true });
-    url.select();
-    if (navigator.clipboard) navigator.clipboard.writeText(url.value).then(() => message('订阅地址已复制。'), () => message('请手动复制已选中的地址。'));
-    else message('请手动复制已选中的地址。');
+    selectAll(url);
+    copyText(url.value, url);
   };
   $('address-dialog-close').onclick = () => $('address-dialog').close();
   $('address-dialog-cancel').onclick = () => $('address-dialog').close();
+  $('address-dialog-txt').onclick = () => {
+    const url = $('subscription-url').value;
+    if (!url) { message('当前没有可导出的订阅地址。'); return; }
+    const id = (lastAddressResult && lastAddressResult.customer_id) || '';
+    downloadText('订阅地址' + (id ? '-' + id : '') + '.txt', url + '\r\n');
+    message('订阅地址已导出为 txt 文件。');
+  };
   $('reauth-submit').onclick = submitReauth;
   $('reauth-cancel').onclick = closeReauth;
   $('batch-copy').onclick = copyAllAddresses;

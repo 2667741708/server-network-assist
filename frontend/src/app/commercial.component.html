@@ -1,0 +1,190 @@
+<div class="commercial-page">
+  <header class="commercial-header">
+    <div>
+      <p class="eyebrow">LANBRIDGE CONTROL PLANE</p>
+      <h1>{{ pageTitle() }}</h1>
+      <p>客户、订阅、设备、线路授权和短期租约的真实控制面数据。</p>
+    </div>
+    <div class="header-actions">
+      @if (section === 'customers') {
+        <button mat-flat-button color="primary" (click)="startSubscriptionWizard('new')">新建客户并签发订阅</button>
+      }
+      @if (section === 'subscriptions') {
+        <button mat-stroked-button (click)="startSubscriptionWizard('reissue')">给现有客户补发链接</button>
+      }
+      @if (section === 'nodes') {
+        <button mat-flat-button color="primary" (click)="startNewSource()">登记节点</button>
+      }
+      <button mat-button (click)="reload(true)" [disabled]="loading()">刷新</button>
+    </div>
+  </header>
+
+  @if (loading()) {
+    <div class="loading-strip" role="status">正在读取控制平面数据…</div>
+  }
+  @if (error()) {
+    <div class="notice notice-error" role="alert">{{ error() }}</div>
+  }
+  @if (message()) {
+    <div class="notice notice-success" role="status">{{ message() }}</div>
+  }
+
+  @if (section === 'overview') {
+    <section class="metric-grid business-metrics" aria-label="商业服务指标">
+      <mat-card><span>客户总数</span><strong>{{ customerRows.length }}</strong><small>来自客户实体</small></mat-card>
+      <mat-card><span>启用客户</span><strong>{{ activeCustomerCount }}</strong><small>服务状态为启用</small></mat-card>
+      <mat-card><span>已注册设备</span><strong>{{ snapshot().devices.length }}</strong><small>含已撤销记录</small></mat-card>
+      <mat-card><span>活跃租约</span><strong>{{ activeLeaseCount }}</strong><small>未撤销且未过期</small></mat-card>
+      <mat-card><span>有效节点</span><strong>{{ validNodeCount }}</strong><small>当前可供新授权选择</small></mat-card>
+      <mat-card><span>当前目录 revision</span><strong class="metric-text">{{ directoryRevision }}</strong><small>当前 API 未提供 Node Directory</small></mat-card>
+    </section>
+
+    <section class="content-grid two-columns">
+      <mat-card class="business-card">
+        <div class="card-heading"><div><h2>最近设备注册</h2><p>只显示设备身份元数据，不显示私钥或完整 secret。</p></div><span class="section-count">{{ recentDevices.length }}</span></div>
+        <div class="compact-list">
+          @for (device of recentDevices; track device.id) {
+            <button class="list-row" type="button" (click)="openCustomerSubscription(device.customer_id)">
+              <span><strong>{{ device.label || '未命名设备' }}</strong><small class="mono">{{ device.id }}</small></span>
+              <span><small>{{ formatDate(device.created_at) }}</small><b [class]="isEnabled(device.enabled) ? 'status-pill status-active' : 'status-pill status-disabled'">{{ isEnabled(device.enabled) ? '启用' : '已撤销' }}</b></span>
+            </button>
+          } @empty { <p class="empty-state">暂无设备注册记录。</p> }
+        </div>
+      </mat-card>
+      <mat-card class="business-card">
+        <div class="card-heading"><div><h2>最近控制面变更</h2><p>来源于现有 admin audit log；revision 未记录时明确显示。</p></div><span class="section-count">{{ recentEvents.length }}</span></div>
+        <div class="compact-list">
+          @for (event of recentEvents; track event.id) {
+            <div class="list-row static-row"><span><strong>{{ event.action }}</strong><small class="mono long-value">{{ event.target }}</small></span><small>{{ formatDate(event.created_at) }}</small></div>
+          } @empty { <p class="empty-state">暂无商业服务审计事件。</p> }
+        </div>
+      </mat-card>
+    </section>
+
+    <section class="business-card note-card">
+      <h2>十秒定位路径</h2>
+      <p>客户页先看服务状态和活动租约；设备页确认撤销与最近活动；节点页展开 Transport、Endpoint、Egress；审计页确认操作者与最近变更。目录 revision 当前没有后端资源，因此不会显示猜测值。</p>
+    </section>
+  }
+
+  @if (section === 'customers') {
+    <section class="toolbar-card business-card">
+      <div><h2>客户</h2><p>客户、套餐、设备和租约保持独立实体展示。</p></div>
+      <div class="toolbar-controls">
+        <mat-form-field appearance="outline" class="search-field"><mat-label>搜索客户名称或 ID</mat-label><input matInput [(ngModel)]="customerSearch" /></mat-form-field>
+        <mat-form-field appearance="outline" class="status-field"><mat-label>状态</mat-label><mat-select [(ngModel)]="customerStatus"><mat-option value="all">全部</mat-option><mat-option value="active">启用</mat-option><mat-option value="disabled">服务停用</mat-option><mat-option value="archived">已归档/回收</mat-option></mat-select></mat-form-field>
+        <button mat-flat-button color="primary" (click)="startSubscriptionWizard('new')">+ 新建客户</button>
+      </div>
+    </section>
+    <section class="business-card table-card">
+      <div class="table-scroll">
+        <table class="admin-table">
+          <thead><tr><th>客户名称</th><th>客户 ID</th><th>状态</th><th>套餐</th><th>设备数</th><th>活跃租约</th><th>授权到期</th><th>操作</th></tr></thead>
+          <tbody>
+            @for (customer of filteredCustomers; track customer.id) {
+              <tr>
+                <td><button class="link-button" type="button" (click)="openCustomer(customer)"><strong>{{ customer.display_name }}</strong></button></td>
+                <td class="mono long-value">{{ customer.id }}</td>
+                <td><span class="status-pill" [class]="customerStatusClass(customer)">{{ customerStatusLabel(customer) }}</span></td>
+                <td>{{ customerPlan(customer)?.name || '—' }}</td>
+                <td>{{ customerDevices(customer).length }}</td>
+                <td>{{ customer.active_lease_count || 0 }}</td>
+                <td>{{ formatDate(customerExpiry(customer)) }}</td>
+                <td class="row-actions"><button mat-button (click)="openCustomer(customer)">详情</button><button mat-button [class.danger-text]="isEnabled(customer.enabled)" (click)="requestDisableCustomer(customer)">{{ isEnabled(customer.enabled) ? '停用服务' : '恢复服务' }}</button></td>
+              </tr>
+            } @empty { <tr><td colspan="8" class="empty-state">没有匹配的客户。</td></tr> }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
+
+  @if (section === 'subscriptions') {
+    <section class="business-card">
+      <div class="card-heading"><div><h2>套餐模板与实际套餐记录</h2><p>当前 API 返回的是 plans 实体；后端尚未区分独立模板与客户套餐。</p></div><button mat-flat-button color="primary" (click)="startSubscriptionWizard('new')">给客户签发订阅</button></div>
+      <div class="table-scroll"><table class="admin-table"><thead><tr><th>套餐 ID</th><th>名称</th><th>流量</th><th>下载</th><th>上传</th><th>设备上限</th><th>租约时长</th><th>状态</th></tr></thead><tbody>
+        @for (plan of planRows; track plan.id) { <tr><td class="mono long-value">{{ plan.id }}</td><td>{{ plan.name }}</td><td>{{ planQuota(plan) }}</td><td>{{ formatRate(plan.download_bps) }}</td><td>{{ formatRate(plan.upload_bps) }}</td><td>{{ plan.max_devices }}</td><td>{{ plan.lease_seconds }} 秒</td><td><span class="status-pill" [class]="isEnabled(plan.enabled) ? 'status-active' : 'status-disabled'">{{ isEnabled(plan.enabled) ? '启用' : '停用' }}</span></td></tr> }
+        @empty { <tr><td colspan="8" class="empty-state">暂无套餐记录。</td></tr> }
+      </tbody></table></div>
+    </section>
+
+    <section class="business-card wizard-card">
+      <div class="card-heading"><div><h2>{{ subscriptionMode === 'new' ? '签发新客户订阅' : '给现有客户补发一次性链接' }}</h2><p>链接只在签发完成后必要时展示，不保存为页面历史。</p></div><div class="mode-switch"><button [class.selected]="subscriptionMode === 'new'" type="button" (click)="startSubscriptionWizard('new')">新开户</button><button [class.selected]="subscriptionMode === 'reissue'" type="button" (click)="startSubscriptionWizard('reissue')">现有客户</button></div></div>
+      <ol class="wizard-steps" aria-label="订阅签发步骤"><li [class.current]="wizardStep === 1"><b>1</b>选择客户</li><li [class.current]="wizardStep === 2"><b>2</b>套餐 / 流量 / 速度</li><li [class.current]="wizardStep === 3"><b>3</b>允许节点和出口</li><li [class.current]="wizardStep === 4"><b>4</b>生成开户链接</li></ol>
+      @if (wizardStep === 1) {
+        <div class="form-grid">
+          @if (subscriptionMode === 'new') { <mat-form-field appearance="outline"><mat-label>新客户名称</mat-label><input matInput [(ngModel)]="customerName" autocomplete="off" /></mat-form-field> }
+          @if (subscriptionMode === 'reissue') { <mat-form-field appearance="outline"><mat-label>选择客户</mat-label><mat-select [(ngModel)]="reissueCustomerId">@for (customer of customerRows; track customer.id) { <mat-option [value]="customer.id">{{ customer.display_name }} · {{ customer.id }}</mat-option> }</mat-select></mat-form-field> }
+          <mat-form-field appearance="outline"><mat-label>服务地址</mat-label><input matInput [(ngModel)]="baseUrl" /><mat-hint>用于拼接一次性开户注册地址</mat-hint></mat-form-field>
+        </div>
+      }
+      @if (wizardStep === 2) {
+        <div class="form-grid">
+          <div class="field-block full"><span class="field-label">流量额度</span><div class="quota-options">@for (quota of quotas; track quota.label) { <button type="button" [class.selected]="quotaGb === quota.value" (click)="chooseQuota(quota.value)">{{ quota.label }}</button> }</div><small>按 GiB（1024³ 字节）计量；无限流量仍受速度上限约束。</small></div>
+          <mat-form-field appearance="outline"><mat-label>下载上限 Mbps</mat-label><input matInput type="number" min="0" [(ngModel)]="downloadMbps" /></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>上传上限 Mbps</mat-label><input matInput type="number" min="0" [(ngModel)]="uploadMbps" /></mat-form-field>
+        </div>
+      }
+      @if (wizardStep === 3) {
+        <div class="form-grid node-choice-grid"><div class="field-block full"><span class="field-label">允许客户使用的节点</span><small>Node / Transport / Endpoint 的真实后端表示仍来自 source；这里按节点授权选择。</small></div>@for (source of availableSources; track source.id) { <mat-card class="choice-card"><mat-checkbox [checked]="selectedSourceIds.includes(source.id)" (change)="toggleSource(source.id, $event.checked)"><strong>{{ source.name }}</strong></mat-checkbox><span class="mono long-value">{{ source.endpoint }}</span><small>WireGuard · {{ source.relay_interface }}</small><mat-checkbox [disabled]="!proxySourceAllowed(source)" [checked]="proxySourceIds.includes(source.id)" (change)="toggleProxySource(source.id, $event.checked)">为此授权使用源机代理</mat-checkbox></mat-card> } @empty { <p class="empty-state">暂无有效节点，请先在“节点与出口”登记。</p> }</div>
+      }
+      @if (wizardStep === 4) {
+        <div class="review-grid"><div><span>客户</span><strong>{{ subscriptionMode === 'new' ? customerName : customerNameById(reissueCustomerId) }}</strong></div><div><span>流量</span><strong>{{ quotaGb === null ? '无限 GB' : quotaGb + ' GB' }}</strong></div><div><span>速度</span><strong>{{ downloadMbps }} / {{ uploadMbps }} Mbps</strong></div><div><span>节点</span><strong>{{ selectedSourceIds.length || '现有客户配置' }}</strong></div></div>
+        <div class="warning-card"><strong>生成后请确认</strong><ul><li>开户令牌有效期 24 小时，只能使用一次。</li><li>订阅到期时间由服务端返回；新开户当前为 30 天。</li><li>不要公开分享开户链接，也不要把它写入工单历史或截图。</li></ul></div>
+      }
+      <div class="wizard-actions"><button mat-button [disabled]="wizardStep === 1" (click)="previousWizardStep()">上一步</button>@if (wizardStep < 4) { <button mat-flat-button color="primary" (click)="nextWizardStep()">下一步</button> } @else { <button mat-flat-button color="primary" [disabled]="busy()" (click)="generateSubscription()">{{ subscriptionMode === 'new' ? '生成一次性开户链接' : '补发一次性开户链接' }}</button> }</div>
+    </section>
+
+    @if (oneTimeResult(); as result) {
+      <section class="business-card secret-result" role="status"><div class="card-heading"><div><h2>一次性链接已生成</h2><p>这是必要时的短暂展示，不作为页面历史保存。交付后请点击隐藏。</p></div><button mat-button (click)="hideOneTimeResult()">隐藏链接</button></div><mat-form-field appearance="outline" class="full"><mat-label>开户注册地址（含一次性令牌）</mat-label><textarea matInput readonly rows="3" [value]="result.url"></textarea></mat-form-field><div class="result-meta"><span>客户 ID：<b class="mono">{{ result.customer_id }}</b></span><span>令牌到期：<b>{{ formatDate(result.enrollment_expires_at) }}</b></span><span>订阅到期：<b>{{ formatDate(result.expires_at) }}</b></span></div><button mat-stroked-button (click)="copyOneTimeUrl()">复制链接</button></section>
+    }
+  }
+
+  @if (section === 'devices') {
+    <section class="business-card"><div class="card-heading"><div><h2>设备</h2><p>只显示设备公钥指纹，不显示私钥、完整 secret 或授权令牌。</p></div></div><div class="table-scroll"><table class="admin-table"><thead><tr><th>Device ID</th><th>所属客户</th><th>名称</th><th>状态</th><th>注册时间</th><th>签名公钥指纹</th><th>最近活动</th><th>操作</th></tr></thead><tbody>
+      @for (device of snapshot().devices; track device.id) { <tr><td class="mono long-value">{{ device.id }}</td><td>{{ customerNameById(device.customer_id) }}</td><td>{{ device.label || '未命名设备' }}</td><td><span class="status-pill" [class]="isEnabled(device.enabled) ? 'status-active' : 'status-disabled'">{{ isEnabled(device.enabled) ? '启用' : '已撤销' }}</span></td><td>{{ formatDate(device.created_at) }}</td><td class="mono long-value">{{ fingerprint(device) }}</td><td>{{ formatDate(device.last_seen_at) }}</td><td class="row-actions"><button mat-button [class.danger-text]="isEnabled(device.enabled)" (click)="requestRevokeDevice(device)">{{ isEnabled(device.enabled) ? '撤销设备' : '恢复设备' }}</button><button mat-button disabled title="当前后端没有兼容的凭据轮换 API">轮换凭据</button></td></tr> }
+      @empty { <tr><td colspan="8" class="empty-state">暂无设备。</td></tr> }
+    </tbody></table></div></section>
+  }
+
+  @if (section === 'nodes') {
+    <section class="content-grid two-columns nodes-summary"><mat-card class="business-card"><h2>源机代理</h2><p>只展示当前 API 能读取到的代理状态；启动动作不改变客户授权。</p><div class="proxy-state"><span class="status-dot" [class.good]="sourceProxy['available'] === true"></span><strong>{{ sourceProxy['running'] ? '运行中' : '未运行' }}</strong><span>{{ sourceProxy['tun_ready'] ? 'TUN 就绪' : 'TUN 未就绪' }}</span></div><p>{{ sourceProxy['reason'] || '—' }}</p><button mat-flat-button (click)="startSourceProxy()">启动源机代理</button></mat-card><mat-card class="business-card"><h2>模型边界</h2><p>当前后端以 <code>source</code> 存储节点连接配置，以 <code>line_grant</code> 存储客户授权；页面用层级卡片表达 Node → Transport → Endpoint → Egress，但不新增独立实体。</p><p class="muted">Transport priority、Endpoint priority/expiry 和 Egress 独立 ID 未由当前 API 提供。</p></mat-card></section>
+    <section class="business-card"><div class="card-heading"><div><h2>Node Directory</h2><p>当前已登记节点按真实 source 数据展示。</p></div><span class="status-pill status-active">{{ validNodeCount }} 个有效节点</span></div><div class="node-stack">
+      @for (source of snapshot().sources; track source.id) { <mat-expansion-panel class="node-panel"><mat-expansion-panel-header><mat-panel-title><span class="node-title"><strong>{{ source.name }}</strong><span class="mono">{{ source.id }}</span></span><span class="status-pill" [class]="sourceStatusClass(source)">{{ sourceStatusLabel(source) }}</span></mat-panel-title><mat-panel-description>{{ source.endpoint }} · {{ grantForSource(source).length }} 条客户授权</mat-panel-description></mat-expansion-panel-header><div class="node-body"><div class="entity-level"><div class="level-heading"><span class="level-icon">N</span><div><strong>Node</strong><small>节点 ID · {{ source.id }}</small></div><button mat-button (click)="editSource(source)">编辑节点</button></div><dl class="detail-grid"><div><dt>名称</dt><dd>{{ source.name }}</dd></div><div><dt>状态</dt><dd>{{ sourceStatusLabel(source) }}</dd></div><div><dt>优先级</dt><dd>{{ nodePriority() }}</dd></div><div><dt>客户访问</dt><dd>{{ endpointAccess() }}</dd></div></dl></div><div class="entity-level"><div class="level-heading"><span class="level-icon">T</span><div><strong>Transport · WireGuard</strong><small>当前 source 的中继传输表示</small></div></div><dl class="detail-grid"><div><dt>kind</dt><dd>WireGuard</dd></div><div><dt>access</dt><dd>{{ endpointAccess() }}</dd></div><div><dt>priority</dt><dd>{{ nodePriority() }}</dd></div></dl><div class="entity-level nested"><div class="level-heading"><span class="level-icon">E</span><div><strong>Endpoint</strong><small>source.endpoint</small></div></div><dl class="detail-grid"><div><dt>address</dt><dd class="mono long-value">{{ source.endpoint }}</dd></div><div><dt>priority</dt><dd>{{ nodePriority() }}</dd></div><div><dt>expires_at</dt><dd>{{ formatDate(grantExpiry(source)) }}</dd></div><div><dt>enabled</dt><dd>{{ sourceStatusLabel(source) }}</dd></div></dl></div></div><div class="entity-level"><div class="level-heading"><span class="level-icon">X</span><div><strong>Egress</strong><small>由 source / grant 的真实出口策略组成</small></div></div><dl class="detail-grid"><div><dt>id</dt><dd class="mono">{{ source.egress_interface || '未提供' }}</dd></div><div><dt>kind</dt><dd>{{ source.egress_mode === 'physical' ? 'source-physical' : 'source-managed-proxy' }}</dd></div><div><dt>interface</dt><dd class="mono">{{ source.egress_interface || '—' }}</dd></div><div><dt>客户授权</dt><dd>{{ grantForSource(source).length }} 条</dd></div></dl></div><div class="node-actions"><button mat-button (click)="toggleSourceEnabled(source)">{{ sourceEnabled(source) ? '停用节点' : '启用节点' }}</button><button mat-button class="danger-text" (click)="deleteSource(source)">移除节点</button></div></div></mat-expansion-panel> }
+      @empty { <p class="empty-state">暂无节点。</p> }
+    </div></section>
+    @if (sourceDraft) { <section class="business-card editor-card"><div class="card-heading"><div><h2>{{ sourceDraft.id ? '编辑节点' : '登记节点' }}</h2><p>按 Node、Transport/Endpoint、Egress 分组，字段仍映射到现有 source-save API。</p></div><button mat-button (click)="closeSourceEditor()">取消</button></div><div class="form-section"><h3>Node</h3><div class="form-grid"><mat-form-field appearance="outline"><mat-label>节点名称</mat-label><input matInput [ngModel]="sourceDraft.name" (ngModelChange)="setSourceField('name',$event)" /></mat-form-field><mat-form-field appearance="outline"><mat-label>客户地址池 CIDR</mat-label><input matInput [ngModel]="sourceDraft.address_pool" (ngModelChange)="setSourceField('address_pool',$event)" /></mat-form-field></div></div><div class="form-section"><h3>Transport / Endpoint</h3><div class="form-grid"><mat-form-field appearance="outline"><mat-label>Transport kind</mat-label><input matInput value="WireGuard" readonly /></mat-form-field><mat-form-field appearance="outline"><mat-label>Endpoint address:UDP port</mat-label><input matInput [ngModel]="sourceDraft.endpoint" (ngModelChange)="setSourceField('endpoint',$event)" /></mat-form-field><mat-form-field appearance="outline"><mat-label>Relay public key</mat-label><textarea matInput rows="2" [ngModel]="sourceDraft.relay_public_key" (ngModelChange)="setSourceField('relay_public_key',$event)"></textarea></mat-form-field><mat-form-field appearance="outline"><mat-label>Relay interface</mat-label><input matInput [ngModel]="sourceDraft.relay_interface" (ngModelChange)="setSourceField('relay_interface',$event)" /></mat-form-field></div></div><div class="form-section"><h3>Egress</h3><div class="form-grid"><mat-form-field appearance="outline"><mat-label>Egress kind</mat-label><mat-select [ngModel]="sourceDraft.egress_mode" (ngModelChange)="setSourceField('egress_mode',$event)"><mat-option value="physical">source-physical</mat-option><mat-option value="source_proxy">source-managed-proxy</mat-option></mat-select></mat-form-field><mat-form-field appearance="outline"><mat-label>Egress interface</mat-label><input matInput [ngModel]="sourceDraft.egress_interface" (ngModelChange)="setSourceField('egress_interface',$event)" /></mat-form-field><mat-form-field appearance="outline"><mat-label>Physical gateway IPv4</mat-label><input matInput [ngModel]="sourceDraft.egress_gateway" (ngModelChange)="setSourceField('egress_gateway',$event)" /></mat-form-field><mat-form-field appearance="outline"><mat-label>DNS IPv4（逗号分隔）</mat-label><input matInput [ngModel]="sourceDraft.dns" (ngModelChange)="setSourceField('dns',$event)" /></mat-form-field></div></div><button mat-flat-button color="primary" (click)="saveSource()">保存节点配置</button></section> }
+  }
+
+  @if (section === 'leases') {
+    <section class="toolbar-card business-card"><div><h2>租约</h2><p>Lease 是短期运行时授权，与客户、设备、Grant 和节点分开显示。当前模型不区分 Released 与 Revoked。</p></div><mat-form-field appearance="outline" class="status-field"><mat-label>状态</mat-label><mat-select [(ngModel)]="leaseStatus"><mat-option value="active">Active</mat-option><mat-option value="expired">Expired</mat-option><mat-option value="revoked">Revoked</mat-option><mat-option value="all">全部</mat-option></mat-select></mat-form-field></section>
+    <section class="business-card table-card"><div class="table-scroll"><table class="admin-table"><thead><tr><th>Lease ID</th><th>客户</th><th>设备</th><th>节点 / Grant</th><th>出口</th><th>状态</th><th>issued_at</th><th>expires_at</th><th>流量</th><th>quota</th><th>操作</th></tr></thead><tbody>
+      @for (lease of filteredLeases; track lease.id) { <tr><td class="mono long-value">{{ lease.id }}</td><td>{{ leaseCustomer(lease) }}</td><td>{{ leaseDevice(lease) }}</td><td><span class="mono long-value">{{ lease.grant_id }}</span><small>{{ leaseGrant(lease)?.alias || '—' }}</small></td><td>{{ leaseEgress(lease) }}</td><td><span class="status-pill" [class]="leaseStatusClass(lease)">{{ leaseStatusLabel(lease) }}</span></td><td>{{ formatDate(lease.issued_at) }}</td><td>{{ formatDate(lease.expires_at) }}</td><td>{{ formatBytes(lease.last_rx + lease.last_tx) }}</td><td>{{ customerPlanForLease(lease)?.quota_bytes === null ? '无限' : formatBytes(customerPlanForLease(lease)?.quota_bytes) }}</td><td><button mat-button class="danger-text" [disabled]="leaseStatusOf(lease) !== 'active'" (click)="requestLeaseRevoke(lease)">撤销租约</button></td></tr> }
+      @empty { <tr><td colspan="11" class="empty-state">没有匹配的租约。</td></tr> }
+    </tbody></table></div></section>
+  }
+
+  @if (section === 'directory') {
+    <section class="business-card unsupported-panel"><span class="status-pill status-disabled">当前 API 未接入</span><h2>Node Directory / Directory Revision</h2><p>当前控制平面没有提供 Node Directory 的 schema version、revision、issued_at、expires_at 或签名公钥指纹资源，因此本页不显示猜测值，也不提供伪造的“预览下一版 / 发布”按钮。</p><dl class="detail-grid"><div><dt>current revision</dt><dd>不可用</dd></div><div><dt>schema version</dt><dd>不可用</dd></div><div><dt>issued_at / expires_at</dt><dd>不可用</dd></div><div><dt>signing public key fingerprint</dt><dd>不可用</dd></div></dl><div class="warning-card"><strong>安全边界</strong><p>目录是客户端签名信任链的一部分。当前 API 没有可安全呈现的发布状态或 signing private key 管理能力，UI 不会添加普通输入框，也不会绕过 reauth。</p></div></section>
+  }
+
+  @if (selectedCustomerView; as customer) {
+    <aside class="customer-drawer" role="dialog" aria-modal="true" aria-label="客户详情">
+      <div class="drawer-head"><div><p class="eyebrow">CUSTOMER DETAIL</p><h2>{{ customer.display_name }}</h2><span class="mono long-value">{{ customer.id }}</span></div><button mat-button (click)="closeCustomer()">关闭</button></div>
+      <div class="drawer-tabs" role="tablist"><button [class.active]="customerTab === 'overview'" (click)="selectCustomerTab('overview')">概览</button><button [class.active]="customerTab === 'subscription'" (click)="selectCustomerTab('subscription')">订阅</button><button [class.active]="customerTab === 'devices'" (click)="selectCustomerTab('devices')">设备</button><button [class.active]="customerTab === 'leases'" (click)="selectCustomerTab('leases')">租约</button><button [class.active]="customerTab === 'audit'" (click)="selectCustomerTab('audit')">审计</button></div>
+      @if (customerTab === 'overview') { <div class="drawer-section"><div class="drawer-status"><span class="status-pill" [class]="customerStatusClass(customer)">{{ customerStatusLabel(customer) }}</span><button mat-stroked-button (click)="requestDisableCustomer(customer)">{{ isEnabled(customer.enabled) ? '停用客户服务' : '恢复客户服务' }}</button></div><div class="detail-grid"><div><dt>套餐</dt><dd>{{ customerPlan(customer)?.name || '—' }}</dd></div><div><dt>设备数</dt><dd>{{ customerDevices(customer).length }}</dd></div><div><dt>活跃租约</dt><dd>{{ customer.active_lease_count }}</dd></div><div><dt>授权到期</dt><dd>{{ formatDate(customerExpiry(customer)) }}</dd></div><div><dt>本账期已用</dt><dd>{{ formatBytes(customerUsage(customer).used_bytes) }}</dd></div><div><dt>剩余额度</dt><dd>{{ formatBytes(customerUsage(customer).remaining_bytes) }}</dd></div></div>@if (customer.reasons?.length) { <div class="warning-card"><strong>当前不可用原因</strong><ul>@for (reason of customer.reasons; track reason) { <li>{{ reason }}</li> }</ul></div> }</div> }
+      @if (customerTab === 'subscription') { <div class="drawer-section"><div class="detail-grid"><div><dt>套餐</dt><dd>{{ customerPlan(customer)?.name || '—' }}</dd></div><div><dt>下载 / 上传</dt><dd>{{ formatRate(customerPlan(customer)?.download_bps) }} / {{ formatRate(customerPlan(customer)?.upload_bps) }}</dd></div><div><dt>开户链接状态</dt><dd>{{ subscriptionStatus(customer.id)?.status || '未记录' }}</dd></div><div><dt>令牌到期</dt><dd>{{ formatDate(subscriptionStatus(customer.id)?.expires_at) }}</dd></div></div><div class="drawer-actions"><button mat-flat-button color="primary" (click)="openReissue(customer)">补发一次性注册链接</button><span class="muted">令牌撤销 API 当前未提供，因此不显示“撤销 token”按钮。</span></div><h3>线路 Grant 与 Egress</h3><div class="grant-list">@for (grant of customerGrants(customer); track grant.id) { <div class="grant-row"><div><strong>{{ grant.alias }}</strong><small class="mono long-value">{{ grant.id }} · {{ grant.endpoint }}</small></div><span>{{ egressLabel(grant) }}</span><button mat-button (click)="editGrant(grant)">修改出口</button></div> } @empty { <p class="empty-state">该客户暂无线路授权。</p> }</div>@if (grantDraft) { <div class="inline-editor"><mat-form-field appearance="outline"><mat-label>出口策略</mat-label><mat-select [(ngModel)]="grantDraft.egress_mode"><mat-option value="physical">source-physical</mat-option><mat-option value="source_proxy">source-managed-proxy</mat-option></mat-select></mat-form-field><mat-form-field appearance="outline"><mat-label>出口接口</mat-label><input matInput [(ngModel)]="grantDraft.egress_interface" /></mat-form-field><mat-form-field appearance="outline"><mat-label>网关 IPv4</mat-label><input matInput [(ngModel)]="grantDraft.egress_gateway" /></mat-form-field><mat-form-field appearance="outline"><mat-label>DNS IPv4</mat-label><input matInput [(ngModel)]="grantDraft.dns" /></mat-form-field><button mat-flat-button color="primary" (click)="saveGrant()">保存出口并撤销旧租约</button><button mat-button (click)="cancelGrantEdit()">取消</button></div> }</div> }
+      @if (customerTab === 'devices') { <div class="drawer-section"><div class="drawer-list">@for (device of customerDevices(customer); track device.id) { <div class="drawer-list-row"><div><strong>{{ device.label || '未命名设备' }}</strong><small class="mono long-value">{{ device.id }}</small><small>最近活动：{{ formatDate(device.last_seen_at) }}</small></div><div><span class="status-pill" [class]="isEnabled(device.enabled) ? 'status-active' : 'status-disabled'">{{ isEnabled(device.enabled) ? '启用' : '已撤销' }}</span><button mat-button (click)="requestRevokeDevice(device)">{{ isEnabled(device.enabled) ? '撤销设备' : '恢复设备' }}</button></div></div> } @empty { <p class="empty-state">暂无设备。</p> }</div><p class="muted">凭据轮换当前没有兼容后端 API；不会在 UI 中生成或显示私钥。</p></div> }
+      @if (customerTab === 'leases') { <div class="drawer-section"><div class="drawer-list">@for (lease of customerLeases(customer); track lease.id) { <div class="drawer-list-row"><div><strong class="mono long-value">{{ lease.id }}</strong><small>{{ leaseGrant(lease)?.alias || lease.grant_id }} · {{ leaseEgress(lease) }}</small></div><div><span class="status-pill" [class]="leaseStatusClass(lease)">{{ leaseStatusLabel(lease) }}</span><button mat-button class="danger-text" [disabled]="leaseStatusOf(lease) !== 'active'" (click)="requestLeaseRevoke(lease)">撤销</button></div></div> } @empty { <p class="empty-state">暂无租约。</p> }</div></div> }
+      @if (customerTab === 'audit') { <div class="drawer-section"><div class="drawer-list">@for (event of customerAuditEvents(customer.id); track event.id) { <div class="drawer-list-row static-row"><div><strong>{{ event.action }}</strong><small>{{ auditSummary(event) }}</small></div><small>{{ formatDate(event.created_at) }}</small></div> } @empty { <p class="empty-state">暂无该客户审计事件。</p> }</div></div> }
+    </aside>
+  }
+
+  @if (pending; as request) {
+    <div class="dialog-backdrop" role="presentation" (click)="cancelConfirmation()">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" (click)="$event.stopPropagation()">
+        <p class="eyebrow">CONFIRMATION + REAUTH</p><h2 id="confirm-title">{{ request.title }}</h2><p>{{ request.description }}</p><div class="warning-card"><strong>操作后果</strong><p>{{ request.consequence }}</p></div><form (ngSubmit)="confirmPendingAction()"><mat-form-field appearance="outline" class="full"><mat-label>管理员密码</mat-label><input matInput type="password" name="reauth-password" [(ngModel)]="reauthPassword" autocomplete="current-password" required /><mat-hint>沿用现有 /api/reauth 与 fresh() 机制</mat-hint></mat-form-field><div class="dialog-actions"><button mat-button type="button" (click)="cancelConfirmation()">取消</button><button mat-flat-button color="primary" type="submit" [disabled]="busy()">确认并执行</button></div></form>
+      </section>
+    </div>
+  }
+</div>

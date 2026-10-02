@@ -1,6 +1,10 @@
 import base64
 import hashlib
 import json
+import socket
+import ssl
+import urllib.error
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -47,12 +51,16 @@ class Service:
             raise AssertionError('signature did not verify')
         if path == '/client/v1/routes':
             return Response({'routes': [{'id': 'grant-1', 'name': '线路'}]}, request.full_url)
+        if path == '/client/v1/subscription':
+            return Response({'routes': [{'id': 'grant-1', 'name': '线路'}], 'usage':{}}, request.full_url)
         if path == '/client/v1/usage':
             return Response({'used_bytes': 50, 'remaining_bytes': 950}, request.full_url)
         if path == '/client/v1/lease':
-            return Response({'lease': {'id': 'lease-1', 'grant_id': value['grant_id'], 'expires_at': 2000}}, request.full_url)
+            return Response({'lease': {'id': 'lease-1', 'grant_id': value['grant_id'],
+                                       'token': 'stable-lease-token', 'expires_at': 2000}}, request.full_url)
         if path == '/client/v1/lease/renew':
-            return Response({'lease': {'id': value['lease_id'], 'expires_at': 3000}}, request.full_url)
+            return Response({'lease': {'id': value['lease_id'],
+                                       'token': value.get('current_token'), 'expires_at': 3000}}, request.full_url)
         if path == '/client/v1/lease/release':
             return Response({'ok': True}, request.full_url)
         raise AssertionError(path)
@@ -99,7 +107,12 @@ class OnlineClientTests(unittest.TestCase):
         self.assertEqual(self.client.usage()['remaining_bytes'], 950)
         lease = self.client.lease('grant-1')
         self.assertEqual(lease['id'], 'lease-1')
-        self.assertEqual(self.client.renew()['expires_at'], 3000)
+        renewed = self.client.renew()
+        self.assertEqual(renewed['expires_at'], 3000)
+        self.assertEqual(renewed['token'], 'stable-lease-token')
+        renew_request = next(value for path, value, _ in self.service.requests
+                             if path == '/client/v1/lease/renew')
+        self.assertEqual(renew_request['current_token'], 'stable-lease-token')
         self.client.release()
         self.assertIsNone(self.client.active_lease())
         nonces = [headers['X-device-nonce'] for path, _, headers in self.service.requests if path != '/client/v1/enroll']
@@ -111,6 +124,62 @@ class OnlineClientTests(unittest.TestCase):
                 raise OSError('offline')
         client = OnlineServiceClient(Path(self.tmp.name), opener=Failed())
         with self.assertRaisesRegex(ValueError, '无法连接'):
+            client.enroll('https://service.example.test/#enroll=one-time-secret-123')
+        self.assertFalse(client.path.exists())
+
+    def test_connection_failures_are_actionable_and_never_store_credentials(self):
+        cases = (
+            (urllib.error.URLError(TimeoutError('secret-do-not-echo')), '连接超时', '内网订阅入口'),
+            (ConnectionRefusedError('secret-do-not-echo'), '连接被拒绝', '监听端口'),
+            (urllib.error.URLError(socket.gaierror('secret-do-not-echo')), '域名解析失败', 'DNS'),
+            (urllib.error.URLError(ssl.SSLCertVerificationError('secret-do-not-echo')), '证书验证失败', '不会关闭证书验证'),
+            (urllib.error.URLError(ssl.SSLError('secret-do-not-echo')), 'TLS 握手失败', 'HTTP/HTTPS'),
+        )
+        for failure, expected, guidance in cases:
+            with self.subTest(expected=expected):
+                class Failed:
+                    def open(self, request, timeout):
+                        raise failure
+                client = OnlineServiceClient(Path(self.tmp.name), opener=Failed())
+                with self.assertRaises(ValueError) as raised:
+                    client.enroll('http://10.20.32.13:9182/#enroll=campus-one-time-secret')
+                message = str(raised.exception)
+                self.assertIn(expected, message)
+                self.assertIn(guidance, message)
+                self.assertNotIn('secret', message)
+                self.assertNotIn('10.20.32.13', message)
+                self.assertFalse(client.path.exists())
+
+    def test_repeating_same_enrollment_refreshes_signed_subscription_without_new_keys(self):
+        url='https://service.example.test/#enroll=one-time-secret-123'
+        self.client.enroll(url)
+        before=self.client.path.read_bytes()
+        result=self.client.enroll(url)
+        self.assertTrue(result['reused'])
+        self.assertEqual(self.client.path.read_bytes(),before)
+        self.assertEqual([p for p,_,_ in self.service.requests].count('/client/v1/enroll'),1)
+        self.assertEqual(self.service.requests[-1][0],'/client/v1/subscription')
+
+    def test_existing_legacy_registration_and_different_tokens_are_not_overwritten(self):
+        url='https://service.example.test/#enroll=one-time-secret-123'
+        self.client.enroll(url)
+        record=json.loads(self.client.path.read_text())
+        record.pop('enrollment_token_digest')
+        self.client._write_private(self.client.path,record)
+        before=self.client.path.read_bytes()
+        for value in [url,'https://service.example.test/#enroll=different-one-time-secret']:
+            with self.assertRaisesRegex(ValueError,'已完成订阅注册'):
+                self.client.enroll(value)
+        self.assertEqual(self.client.path.read_bytes(),before)
+        self.assertEqual(len(self.service.requests),1)
+
+    def test_json_error_is_decoded_into_readable_chinese(self):
+        class Failed:
+            def open(self,request,timeout):
+                body=json.dumps({'error':'开户令牌无效、已使用或已过期'}).encode()
+                raise urllib.error.HTTPError(request.full_url,400,'bad',{},io.BytesIO(body))
+        client=OnlineServiceClient(Path(self.tmp.name),opener=Failed())
+        with self.assertRaisesRegex(ValueError,'开户令牌无效、已使用或已过期'):
             client.enroll('https://service.example.test/#enroll=one-time-secret-123')
         self.assertFalse(client.path.exists())
 

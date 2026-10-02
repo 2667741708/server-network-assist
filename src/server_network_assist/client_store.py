@@ -21,9 +21,12 @@ from .client_crypto import new_secret, secret_digest
 CLIENT_STORE_SCHEMA_VERSION = 6
 MAX_ACTIVE_V2_PROBES_PER_DEVICE = 3
 SCHEMA_INCOMPATIBLE_MESSAGE = "数据库 schema 版本不兼容，请先停止旧 worker 并完成迁移"
-# Schema 2 requires an integer. This sentinel means an unredeemed, one-use
-# enrollment token does not expire; rotation, use and revocation still apply.
-ENROLLMENT_NEVER_EXPIRES_AT = 2**63 - 1
+# SQLite requires an integer for lease expiry. This sentinel represents an
+# unbounded lease; explicit revocation and the relay offline deadline still apply.
+LEASE_NEVER_EXPIRES_AT = 2**63 - 1
+# Enrollment tokens use the same never-expire representation; they remain
+# one-use and can still be revoked.
+ENROLLMENT_NEVER_EXPIRES_AT = LEASE_NEVER_EXPIRES_AT
 
 PUBLIC_PROXY_CONFIG = {
     "type": "vmess",
@@ -431,15 +434,17 @@ class ClientStore:
         """
         rows = db.execute("""SELECT l.id,l.device_id,l.grant_id,g.relay_interface,
                 g.egress_interface,g.relay_public_key,
-                COALESCE(p.allocated_address,g.allocated_address) allocated_address,
-                COALESCE(p.wireguard_public_key,d.wireguard_public_key) wireguard_public_key
+                COALESCE(probe.allocated_address,g.allocated_address) allocated_address,
+                COALESCE(probe.wireguard_public_key,d.wireguard_public_key) wireguard_public_key
             FROM leases l
             JOIN line_grants g ON g.id=l.grant_id
             JOIN devices d ON d.id=l.device_id
             JOIN customers c ON c.id=l.customer_id
-            LEFT JOIN probe_leases p ON p.lease_id=l.id
+            JOIN plans plan ON plan.id=c.plan_id
+            LEFT JOIN probe_leases probe ON probe.lease_id=l.id
             WHERE l.revoked_at IS NULL AND l.expires_at>?
-              AND d.enabled=1 AND c.enabled=1 AND g.enabled=1
+              AND d.enabled=1 AND c.enabled=1 AND c.revoked_at IS NULL
+              AND plan.enabled=1 AND g.enabled=1
               AND (g.expires_at IS NULL OR g.expires_at>?)
               AND g.access_mode='wireguard'""", (now, now)).fetchall()
         addresses: dict[tuple[str, str], str] = {}
@@ -535,9 +540,13 @@ class ClientStore:
     def create_plan(self, name: str, *, plan_id: str | None = None, download_bps: int | None = None,
                     upload_bps: int | None = None, quota_bytes: int | None = None,
                     period_seconds: int = 30 * 86400, max_devices: int = 1,
-                    lease_seconds: int = 900, now: int | None = None) -> dict[str, Any]:
+                    lease_seconds: int = LEASE_NEVER_EXPIRES_AT,
+                    now: int | None = None) -> dict[str, Any]:
         values = (download_bps, upload_bps, quota_bytes)
-        if not name.strip() or any(v is not None and v < 0 for v in values) or period_seconds < 60 or max_devices < 1 or not 60 <= lease_seconds <= 86400:
+        if (not name.strip() or any(v is not None and v < 0 for v in values) or
+                period_seconds < 60 or max_devices < 1 or
+                isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or
+                not 60 <= lease_seconds <= (2**63 - 1)):
             raise ClientStoreError("套餐参数无效")
         now = int(time.time()) if now is None else now
         plan_id = plan_id or self._id("plan")
@@ -663,7 +672,8 @@ class ClientStore:
                 id,name,download_bps,upload_bps,quota_bytes,period_seconds,max_devices,
                 lease_seconds,enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)''',
                        (plan_id, str(validity_days) + '天' + product + ' ' + ('不限流量' if quota_gb is None else str(quota_gb) + ' GiB'),
-                        download_bps, upload_bps, quota, validity_days * 86400, 1, 900, 1, now))
+                        download_bps, upload_bps, quota, validity_days * 86400, 1,
+                        duration_seconds, 1, now))
             db.execute('''INSERT INTO customers(
                 id,display_name,plan_id,enabled,revoked_at,created_at,auth_epoch,group_id)
                 VALUES(?,?,?,?,?,?,?,?)''', (customer_id, name.strip(), plan_id, 1, None, now, 0, group_id))
@@ -1079,6 +1089,7 @@ class ClientStore:
                            probe_v2: bool = False) -> str:
         lease_id, token = self._id("lease"), new_secret("lea_")
         row = db.execute("""SELECT d.customer_id,d.enabled device_enabled,c.enabled customer_enabled,
+              c.revoked_at customer_revoked_at,
               c.plan_id,g.enabled grant_enabled,g.expires_at grant_expires,g.customer_id grant_customer,
               g.access_mode,g.relay_interface,g.allocated_address,g.relay_public_key,
               p.enabled plan_enabled,p.lease_seconds,p.quota_bytes,p.period_seconds,
@@ -1086,6 +1097,7 @@ class ClientStore:
               JOIN plans p ON p.id=c.plan_id JOIN line_grants g ON g.id=? WHERE d.id=?""",
                            (grant_id, device_id)).fetchone()
         if (not row or not all(row[k] for k in ("device_enabled", "customer_enabled", "grant_enabled", "plan_enabled"))
+                or row["customer_revoked_at"] is not None
                 or row["customer_id"] != row["grant_customer"]):
             raise ClientStoreError("设备或线路未获授权")
         if supersede_id:
@@ -1101,14 +1113,37 @@ class ClientStore:
         usage = self._usage_in_db(db, row["customer_id"], row["period_seconds"], now)
         if row["quota_bytes"] is not None and usage["used_bytes"] >= row["quota_bytes"]:
             raise ClientStoreError("本账期流量额度已经用完")
-        duration = row["lease_seconds"] if ttl is None else min(ttl, row["lease_seconds"])
-        if duration <= 0:
-            raise ClientStoreError("租约时长无效")
-        expires = now + duration
         if row["grant_expires"] is not None:
-            expires = min(expires, row["grant_expires"])
+            # A finite service grant is the authoritative lease deadline.
+            # Do not shorten long subscriptions with an artificial cap.
+            expires = int(row["grant_expires"])
+            if ttl is not None:
+                expires = min(expires, now + ttl)
+        else:
+            # An unbounded package stays unbounded and does not periodically
+            # rotate its bearer token. Revocation is still checked on every
+            # authorization request; relay offline_deadline remains separate.
+            if ttl is not None:
+                if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl <= 0:
+                    raise ClientStoreError("租约时长无效")
+                expires = now + ttl
+            else:
+                expires = LEASE_NEVER_EXPIRES_AT
         if expires <= now:
             raise ClientStoreError("线路授权已经过期")
+        if supersede_id and row["access_mode"] == "wireguard":
+            # A WireGuard lease ID is also the relay's peer identity. Rotate
+            # only its bearer token and authorization expiry in place so the
+            # relay never removes and re-adds the data-carrying peer.
+            self._ensure_wireguard_candidate(db, device_id, grant_id, now)
+            changed = db.execute("""UPDATE leases SET token_digest=?,expires_at=?
+                WHERE id=? AND device_id=? AND grant_id=? AND revoked_at IS NULL""",
+                                 (secret_digest(token, "lease"), expires,
+                                  supersede_id, device_id, grant_id)).rowcount
+            if changed != 1:
+                raise ClientStoreError("租约已撤销或不再有效")
+            self._ensure_active_wireguard_state(db, now)
+            return token
         if row["access_mode"] == "wireguard":
             device_count = db.execute("SELECT COUNT(*) FROM devices WHERE customer_id=? AND enabled=1",
                                       (row["customer_id"],)).fetchone()[0]
@@ -1407,20 +1442,52 @@ class ClientStore:
         return self.probe_lease(device_id, probe_id)
 
     def renew_lease(self, device_id: str, lease_id: str, *, now: int | None = None,
-                    relay_capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
+                    relay_capabilities: dict[str, Any] | None = None,
+                    current_token: str | None = None) -> dict[str, Any]:
         now = int(time.time()) if now is None else now
+        stable_token = None
         with self._lock, self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT device_id,grant_id FROM leases WHERE id=? AND revoked_at IS NULL",
-                             (lease_id,)).fetchone()
+            row = db.execute("""SELECT l.device_id,l.customer_id,l.grant_id,l.token_digest,l.expires_at,
+                g.expires_at grant_expires,g.enabled grant_enabled,d.enabled device_enabled,
+                c.enabled customer_enabled,c.revoked_at customer_revoked_at,
+                p.enabled plan_enabled,p.quota_bytes,p.period_seconds
+                FROM leases l JOIN line_grants g ON g.id=l.grant_id
+                JOIN devices d ON d.id=l.device_id JOIN customers c ON c.id=l.customer_id
+                JOIN plans p ON p.id=c.plan_id
+                WHERE l.id=? AND l.revoked_at IS NULL""", (lease_id,)).fetchone()
             if not row or row["device_id"] != device_id:
                 raise ClientStoreError("租约不存在或不属于当前设备")
             if db.execute("SELECT 1 FROM probe_leases WHERE lease_id=?",
                           (lease_id,)).fetchone():
                 raise ClientStoreError("检测租约不能续租")
-            token = self._issue_lease_in_db(db, device_id, row["grant_id"], ttl=None, now=now,
-                                            relay_capabilities=relay_capabilities,
-                                            supersede_id=lease_id)
+            if row["grant_expires"] is None:
+                if (not isinstance(current_token, str) or not current_token or
+                        not hmac.compare_digest(row["token_digest"],
+                                                secret_digest(current_token, "lease"))):
+                    raise ClientStoreError("无限期套餐续租必须携带当前令牌；不会轮换令牌")
+                if (not row["grant_enabled"] or not row["device_enabled"] or
+                        not row["customer_enabled"] or row["customer_revoked_at"] is not None or
+                        not row["plan_enabled"]):
+                    raise ClientStoreError("租约无效、已撤销或已过期")
+                usage = self._usage_in_db(db, row["customer_id"], row["period_seconds"], now)
+                if row["quota_bytes"] is not None and usage["used_bytes"] >= row["quota_bytes"]:
+                    raise ClientStoreError("本账期流量额度已经用完")
+                # Older clients may still hold the pre-migration short expiry.
+                # Extend only the lease deadline in place, retaining its token,
+                # lease identity, WireGuard peer and counters.
+                if row["expires_at"] != LEASE_NEVER_EXPIRES_AT:
+                    db.execute("UPDATE leases SET expires_at=? WHERE id=? AND revoked_at IS NULL",
+                               (LEASE_NEVER_EXPIRES_AT, lease_id))
+                stable_token = current_token
+            else:
+                token = self._issue_lease_in_db(db, device_id, row["grant_id"], ttl=None, now=now,
+                                                relay_capabilities=relay_capabilities,
+                                                supersede_id=lease_id)
+        if stable_token is not None:
+            result = self.validate_lease(stable_token, now=now)
+            result["token"] = stable_token
+            return result
         result = self.validate_lease(token, now=now)
         result["token"] = token
         return result
@@ -1445,14 +1512,21 @@ class ClientStore:
         with self._connect() as db:
             row = db.execute("""SELECT l.*,g.alias,g.tunnel,g.endpoint,g.enabled grant_enabled,g.expires_at grant_expires,
               d.enabled device_enabled,d.public_key device_signing_public_key,
-              d.wireguard_public_key,c.enabled customer_enabled,p.download_bps,p.upload_bps,p.quota_bytes,p.period_seconds,
+              c.revoked_at customer_revoked_at,
+              d.wireguard_public_key,c.enabled customer_enabled,p.enabled plan_enabled,
+              p.download_bps,p.upload_bps,p.quota_bytes,p.period_seconds,
               g.relay_public_key,g.allocated_address,g.dns,g.allowed_ips,g.mtu,g.relay_interface,g.egress_interface,
               g.access_mode,g.proxy_config,g.egress_policy,pu.uuid proxy_uuid
               FROM leases l JOIN line_grants g ON g.id=l.grant_id JOIN devices d ON d.id=l.device_id
               JOIN customers c ON c.id=l.customer_id JOIN plans p ON p.id=c.plan_id
               LEFT JOIN proxy_users pu ON pu.device_id=d.id WHERE l.token_digest=?""",
               (secret_digest(token, "lease"),)).fetchone()
-            if not row or row["revoked_at"] is not None or row["expires_at"] <= now or not row["grant_enabled"] or not row["device_enabled"] or not row["customer_enabled"] or (row["grant_expires"] is not None and row["grant_expires"] <= now):
+            if (not row or row["revoked_at"] is not None or
+                    (row["expires_at"] != LEASE_NEVER_EXPIRES_AT and row["expires_at"] <= now) or
+                    not row["grant_enabled"] or not row["device_enabled"] or
+                    not row["customer_enabled"] or not row["plan_enabled"] or
+                    row["customer_revoked_at"] is not None or
+                    (row["grant_expires"] is not None and row["grant_expires"] <= now)):
                 raise ClientStoreError("租约无效、已撤销或已过期")
             if row["access_mode"] == "wireguard":
                 self._ensure_active_wireguard_state(db, now)
@@ -1604,7 +1678,8 @@ class ClientStore:
               LEFT JOIN probe_leases pr ON pr.lease_id=l.id
               LEFT JOIN proxy_users pu ON pu.device_id=d.id
               WHERE l.revoked_at IS NULL AND l.expires_at>? AND d.enabled=1 AND c.enabled=1
-              AND g.enabled=1 AND (g.expires_at IS NULL OR g.expires_at>?) ORDER BY l.issued_at""",
+              AND c.revoked_at IS NULL AND p.enabled=1 AND g.enabled=1
+              AND (g.expires_at IS NULL OR g.expires_at>?) ORDER BY l.issued_at""",
               (now, now)).fetchall()
             result = []
             for row in rows:

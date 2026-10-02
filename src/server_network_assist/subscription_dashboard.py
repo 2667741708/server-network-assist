@@ -8,7 +8,7 @@ import json
 import hashlib
 import time
 
-from .client_store import ClientStoreError
+from .client_store import ClientStoreError, LEASE_NEVER_EXPIRES_AT
 from .client_egress import validate_egress, validate_interface
 
 
@@ -129,11 +129,14 @@ class SubscriptionDashboard:
             meter['upload_bytes_per_second'] = sum(r['drx']/r['elapsed'] for r in rates) if rates else (None if current_leases else 0)
             meter['measurement_status'] = 'no_reports' if meter['last_report_at'] is None else 'fresh' if now-meter['last_report_at'] <= 30 else 'stale'
             own_changes = [r for r in changes if r['customer_id'] == cid]
+            visible_leases = [dict(lease, expires_at=(
+                None if lease['expires_at'] == LEASE_NEVER_EXPIRES_AT else lease['expires_at']))
+                for lease in current_leases]
             rows.append({'id': cid, 'display_name': customer['display_name'], 'created_at': customer['created_at'],
                 'enabled': bool(customer['enabled']), 'lifecycle':customer['lifecycle'], 'tags':customer['tags'],
                 'notes':customer['notes'], 'lifecycle_changed_at':customer['lifecycle_changed_at'],
                 'plan': plan, 'usage': meter, 'grants': own_grants,
-                'devices': own_devices, 'leases': current_leases, 'active_lease_count': len(current_leases),
+                'devices': own_devices, 'leases': visible_leases, 'active_lease_count': len(current_leases),
                 'usable': not reasons, 'reasons': reasons, 'version': max((c['version'] for c in own_changes), default=0),
                 'revision': self.revision(customer,plan,[g for g in grants if g['customer_id']==cid]),
                 'history': [{k: (json.loads(c[k]) if k in ('previous', 'current') else c[k]) for k in ('version','changed_at','previous','current')} for c in own_changes[:10]],

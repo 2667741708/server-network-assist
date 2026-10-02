@@ -30,6 +30,7 @@ export interface Host {
 }
 
 export interface NetworkProfile {
+  runtime?: { status: string; mismatch: boolean; nodes: Array<{ host_id: string; status: string; checked_at: number; external_tunnels: string[]; last_error: string }> };
   cleanup_pending?: boolean;
   proxy_mode?: 'direct' | 'share';
   proxy_host?: string;
@@ -71,6 +72,12 @@ export interface ProbeResult {
   browser?: boolean;
   browser_name?: string;
   error: string;
+  checked_at?: number;
+  public_route?: string;
+  return_route?: string;
+  global_tunnels?: string[];
+  route_warnings?: string[];
+  assist?: Array<{ profile_id: string; interface: string; active: boolean; desired: boolean; suspended?: boolean; last_error?: string }>;
 }
 
 export interface ClashStatus {
@@ -165,4 +172,168 @@ export interface SecurityInfo {
   passkeys: Array<{ id: string; name: string; created_at: number }>;
   key_enabled: boolean;
   verified: boolean;
+}
+
+export type CommercialSection =
+  | 'overview'
+  | 'customers'
+  | 'subscriptions'
+  | 'devices'
+  | 'nodes'
+  | 'leases'
+  | 'directory';
+
+export interface CommercialPlan {
+  id: string;
+  name: string;
+  download_bps: number | null;
+  upload_bps: number | null;
+  quota_bytes: number | null;
+  period_seconds: number;
+  max_devices: number;
+  lease_seconds: number;
+  enabled: boolean | number;
+  created_at: number;
+}
+
+export interface CommercialCustomer {
+  id: string;
+  display_name: string;
+  plan_id: string;
+  enabled: boolean | number;
+  revoked_at: number | null;
+  created_at: number;
+  lifecycle?: 'active' | 'archived' | 'deleted';
+  tags?: string[];
+  notes?: string;
+}
+
+export interface CommercialSource {
+  id: string;
+  name: string;
+  endpoint: string;
+  relay_public_key: string;
+  address_pool: string;
+  relay_interface: string;
+  egress_interface: string;
+  egress_mode?: 'physical' | 'source_proxy';
+  egress_gateway?: string;
+  proxy_interface?: string;
+  dns?: string;
+  enabled?: boolean;
+  archived?: boolean;
+  revision?: string;
+  [key: string]: unknown;
+}
+
+export interface CommercialDevice {
+  id: string;
+  customer_id: string;
+  label: string;
+  public_key: string;
+  wireguard_public_key: string;
+  enabled: boolean | number;
+  revoked_at: number | null;
+  created_at: number;
+  last_seen_at: number | null;
+}
+
+export interface CommercialGrant {
+  id: string;
+  customer_id: string;
+  alias: string;
+  tunnel: string;
+  endpoint: string;
+  enabled: boolean | number;
+  relay_public_key: string;
+  allocated_address: string;
+  dns: string;
+  allowed_ips: string;
+  mtu: number;
+  relay_interface: string;
+  egress_interface: string;
+  egress_policy: string;
+  expires_at: number | null;
+  created_at: number;
+}
+
+export interface CommercialLease {
+  id: string;
+  customer_id: string;
+  device_id: string;
+  grant_id: string;
+  issued_at: number;
+  expires_at: number;
+  revoked_at: number | null;
+  last_rx: number;
+  last_tx: number;
+}
+
+export interface SubscriptionAddressStatus {
+  customer_id: string;
+  expires_at: number | null;
+  used_at: number | null;
+  created_at: number;
+  available: boolean;
+  can_reissue: boolean;
+  status: string;
+}
+
+export interface CommercialSnapshot {
+  sources: CommercialSource[];
+  plans: CommercialPlan[];
+  customers: CommercialCustomer[];
+  subscription_addresses: SubscriptionAddressStatus[];
+  devices: CommercialDevice[];
+  grants: CommercialGrant[];
+  leases: CommercialLease[];
+  source_management_supported?: boolean;
+  source_proxy?: Record<string, unknown>;
+  physical_defaults?: Record<string, string>;
+  local_proxy_source_ids?: string[];
+}
+
+export interface DashboardCustomer extends CommercialCustomer {
+  plan: CommercialPlan;
+  usage: {
+    used_bytes: number;
+    remaining_bytes: number | null;
+    quota_bytes: number | null;
+    today_bytes?: number;
+    total_bytes?: number;
+    measurement_status?: string;
+    last_report_at?: number | null;
+  };
+  grants: Array<{
+    id: string;
+    name: string;
+    source_id: string | null;
+    source_name: string;
+    endpoint: string;
+    enabled: boolean;
+    expires_at: number | null;
+    egress_mode: string;
+    available: boolean;
+    reasons: string[];
+  }>;
+  devices: CommercialDevice[];
+  leases: CommercialLease[];
+  active_lease_count: number;
+  usable: boolean;
+  reasons: string[];
+  version: number;
+  revision: string;
+}
+
+export interface DashboardSnapshot {
+  generated_at: number;
+  customers: DashboardCustomer[];
+  summary: {
+    customers: number;
+    usable: number;
+    active_leases: number;
+    today_bytes: number;
+    total_bytes: number;
+  };
+  measurement_note?: string;
 }

@@ -618,7 +618,8 @@ class ClientServiceAPI:
                 self.require_grant_relay_contract(lease_record['grant_id'], capabilities)
                 lease = self.store.renew_lease(
                     device['id'], lease_id,
-                    relay_capabilities=capabilities)
+                    relay_capabilities=capabilities,
+                    current_token=value.get('current_token'))
             except ClientStoreError as exc:
                 raise web.HTTPConflict(text=str(exc)) from exc
             lease = self._lease_endpoint(device, lease['grant_id'], lease)

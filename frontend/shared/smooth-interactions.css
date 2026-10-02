@@ -1,0 +1,29 @@
+/* BEGIN SNA SMOOTH INTERACTIONS (generated from frontend/shared) */
+/* Existing Tabler / Framework7 tokens and controls continue to supply the UI. */
+button:not(:disabled),summary,[role="button"] { touch-action: manipulation; }
+button:not(:disabled):active { filter: brightness(.94); }
+button.sna-busy { position: relative; }
+button.sna-busy::after {
+  content: ""; display: inline-block; width: .7em; height: .7em;
+  margin-inline-start: .5em; border: 2px solid currentColor;
+  border-inline-end-color: transparent; border-radius: 50%;
+  animation: sna-pending-spin .7s linear infinite; vertical-align: -.05em;
+}
+@keyframes sna-pending-spin { to { transform: rotate(360deg); } }
+.plan-panel,.plan { view-transition-name: sna-plan; }
+::view-transition-old(sna-plan) {
+  animation: sna-view-out 100ms ease-out both;
+}
+::view-transition-new(sna-plan) {
+  animation: sna-view-in 140ms cubic-bezier(.2,.7,.2,1) both;
+}
+::view-transition { pointer-events: none; }
+@keyframes sna-view-out { to { opacity: 0; } }
+@keyframes sna-view-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  button.sna-busy::after { animation: none; }
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+/* END SNA SMOOTH INTERACTIONS */

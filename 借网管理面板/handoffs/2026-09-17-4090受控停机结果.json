@@ -1,0 +1,62 @@
+{
+  "scope": "D321 client proxy; 4090 source mihomo/Meta stopped with health watchdog suspended",
+  "source_stop": "2026-09-17T15:10:13+08:00",
+  "source_restore": "2026-09-17T15:11:28+08:00",
+  "note": "Sampler preceded the client test due to remote tool serialization; source journal confirms no restart over the complete window. HTTP 000 and timeout do not constitute a TLS success.",
+  "results": [
+    {
+      "test": 0,
+      "execution": {
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 41395,
+        "stdout": {
+          "text": "{\"samples\": 40, \"all_mihomo_stopped\": true, \"all_Meta_absent\": true, \"all_health_timer_stopped\": true, \"all_config_unchanged\": true, \"firewall_unchanged_during_samples\": true, \"first_time\": 1789629013.9396362, \"last_time\": 1789629054.2178404}\n",
+          "size_bytes": 243,
+          "truncated": false
+        },
+        "stderr": {
+          "text": "",
+          "size_bytes": 0,
+          "truncated": false
+        }
+      }
+    },
+    {
+      "test": 1,
+      "execution": {
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 26169,
+        "stdout": {
+          "text": "{\"phase\": \"controlled-source-off\", \"time\": 1789629085, \"curl\": [{\"url\": \"https://www.google.com/generate_204\", \"exit\": 28, \"result\": \"000 TLS=0 IP=\", \"error\": \"curl: (28) Connection timed out after 5005 milliseconds\\n\"}, {\"url\": \"https://chatgpt.com/\", \"exit\": 28, \"result\": \"000 TLS=0 IP=\", \"error\": \"curl: (28) Connection timed out after 5007 milliseconds\\n\"}, {\"url\": \"https://www.baidu.com/\", \"exit\": 28, \"result\": \"000 TLS=0 IP=\", \"error\": \"curl: (28) Connection timed out after 5002 milliseconds\\n\"}], \"codex_exit\": 1, \"codex_timeout\": true, \"codex_reply\": false}\r\n",
+          "size_bytes": 571,
+          "truncated": false
+        },
+        "stderr": {
+          "text": "",
+          "size_bytes": 0,
+          "truncated": false
+        }
+      }
+    },
+    {
+      "test": 2,
+      "execution": {
+        "exit_code": 28,
+        "timed_out": false,
+        "duration_ms": 5033,
+        "stdout": {
+          "text": "000 TLS=0 IP=",
+          "size_bytes": 13,
+          "truncated": false
+        },
+        "stderr": {
+          "text": "curl: (28) Connection timed out after 5001 milliseconds\n",
+          "size_bytes": 56,
+          "truncated": false
+        }
+      }
+    }
+  ]
+}

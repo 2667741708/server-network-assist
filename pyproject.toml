@@ -32,7 +32,7 @@ Documentation = "https://github.com/2667741708/server-network-assist/tree/main/d
 Issues = "https://github.com/2667741708/server-network-assist/issues"
 
 [project.optional-dependencies]
-desktop = ["pystray==0.19.5", "Pillow==12.3.0"]
+desktop = ["pystray==0.19.5", "Pillow==12.3.0", "PyYAML==6.0.3"]
 
 [project.scripts]
 server-network-assist = "server_network_assist.cli:main"
@@ -54,7 +54,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-server_network_assist = ["ui/*", "ui/**/*", "*.ps1", "desktop_ui/*", "client_ui/*"]
+server_network_assist = ["ui/*", "ui/**/*", "*.ps1", "desktop_ui/*", "client_ui/*", "subscription_admin_ui/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

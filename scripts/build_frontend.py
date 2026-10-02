@@ -19,4 +19,6 @@ for entry in TARGET.iterdir():
 for entry in SOURCE.iterdir():
     destination = TARGET / entry.name
     shutil.copytree(entry, destination) if entry.is_dir() else shutil.copy2(entry, destination)
+for entry in (ROOT / 'src' / 'server_network_assist' / 'subscription_admin_ui').iterdir():
+    shutil.copy2(entry, TARGET / entry.name)
 print(f"Copied Angular build to {TARGET}")

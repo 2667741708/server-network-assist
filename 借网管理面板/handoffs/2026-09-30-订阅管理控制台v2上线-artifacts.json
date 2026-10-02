@@ -1,0 +1,140 @@
+{
+  "operation": "OPS-NET-063",
+  "title": "订阅管理控制台 v2 上线（commercial-admin-v2）",
+  "date": "2026-09-30",
+  "status": "deployed_and_probed_interactive_login_not_verified",
+  "release": "commercial-admin-v2-20260930",
+  "commit": "bab6177",
+  "host": "c201-4090",
+  "credentials_included": false,
+
+  "precheck_isolated": {
+    "site": "/home/a/.local/share/server-network-assist-unified/releases/commercial-admin-v2-20260930/site",
+    "data_dir": "/tmp/sna-v2-pretest",
+    "bind": "127.0.0.1:9185",
+    "checks_total": 21,
+    "checks_failed": 0,
+    "covered": [
+      "anonymous_session", "login_remember_30", "snapshot_presets", "snapshot_sources",
+      "generate_returns_url", "archive_status_ready", "batch_3_of_3", "batch_duplicates_rejected",
+      "view_archived_url", "expire_ok", "archive_cleared_after_expire", "reissue_after_expire",
+      "reissue_status_ready", "restore_extends_24h", "still_ready_after_restore",
+      "preview_valid", "access_log_preview_row", "access_log_records_remote_ip"
+    ],
+    "note": "An earlier SSH invocation returned exit 255 due to `nohup ... &` holding the session; the service itself started normally and all checks passed.",
+    "localhost_run_same_suite": { "checks_total": 21, "checks_failed": 0 }
+  },
+
+  "production_backup": {
+    "database": "/home/a/.local/share/server-network-assist-commercial/data/backups/pre-admin-v2-20260930.sqlite3",
+    "bytes": 5113380864,
+    "seconds": 14.2,
+    "method": "sqlite3 python module online backup API, source opened read-only (mode=ro)",
+    "quick_check": "ok",
+    "table_count": 29
+  },
+
+  "config_backup": {
+    "dir": "/home/a/.local/share/sna-admin-v2-backup-20260930/",
+    "contents": ["service.d/ (all 10 drop-ins)", "sna-commercial.service"],
+    "disabled_dropin_during_drill": "/home/a/.local/share/sna-admin-v2-backup-20260930/dropin-disabled/"
+  },
+
+  "cutover": {
+    "dropin_written": "/home/a/.config/systemd/user/sna-commercial.service.d/zzzzzzzzzzz-admin-v2-20260930.conf",
+    "previous_effective_dropin": "zzzzzzzzzz-readiness-v3-20260928.conf",
+    "dropin_ordering_note": "systemd applies drop-ins in lexicographic filename order; only the last one wins for a given field. 10 drop-ins existed before this release.",
+    "old_main_pid": 1147596,
+    "new_main_pid": 2005103,
+    "new_started": "2026-09-30 02:12:01 CST",
+    "active_state": "active",
+    "sub_state": "running",
+    "exec_main_status": 0,
+    "journal_errors": false,
+    "unit_file_modified": false
+  },
+
+  "probes_readonly": {
+    "subscriptions_html_title": "源网订阅管理",
+    "subscriptions_js": 200,
+    "subscriptions_css": 200,
+    "tabler_min_css": 200,
+    "api_session": {"authenticated": false, "csrf": null, "passkeys": false, "secure": false, "version": "2.0"},
+    "anonymous_dashboard": {"status": 401, "cache_control": "no-store"},
+    "device_access_table": {"exists": true, "rows": 0, "indexes": ["device_access_customer_time", "device_access_device_time"]},
+    "subscription_addresses_rows_before": 25,
+    "subscription_addresses_rows_after": 25
+  },
+
+  "entrypoints": {
+    "note": "all three verified separately; none substitutes for another",
+    "campus_http": {"url": "http://10.20.32.13:9182/subscriptions.html", "status": 200, "title": "源网订阅管理"},
+    "wg_reverse_proxy": {"url": "http://10.201.250.1:9180/subscription-admin/subscriptions.html", "status": 200, "js_status": 200, "title": "源网订阅管理"},
+    "public_https": {"url": "https://whm12.art/subscription-admin/subscriptions.html", "status": 200, "title": "源网订阅管理"}
+  },
+
+  "rollback_drill": {
+    "performed": true,
+    "direction": "bidirectional",
+    "old_ui_file_sha256": "81d4f2b4520861b3634817f43230a5538de8a5084af4ec05634f17146c320897",
+    "new_ui_file_sha256": "ca9c0258122a2db5eb2ab0fb25b29b190d02d9da699f8b3eeb9882861e657cb1",
+    "step1_rollback": {
+      "action": "moved v2 drop-in out, daemon-reload, restart",
+      "working_directory": ".../releases/commercial-readiness-v3-20260928",
+      "served_response_sha256": "81d4f2b4520861b3634817f43230a5538de8a5084af4ec05634f17146c320897",
+      "matches_old_file": true,
+      "served_title": "澜桥 · 订阅管理",
+      "active_state": "active"
+    },
+    "step2_reactivate": {
+      "action": "moved v2 drop-in back, daemon-reload, restart",
+      "working_directory": ".../releases/commercial-admin-v2-20260930",
+      "served_response_sha256": "ca9c0258122a2db5eb2ab0fb25b29b190d02d9da699f8b3eeb9882861e657cb1",
+      "matches_new_file": true,
+      "served_title": "源网订阅管理",
+      "new_main_pid": 2006989,
+      "active_state": "active"
+    },
+    "database_touched_by_rollback": false
+  },
+
+  "data_compatibility": {
+    "table_pre_existed": true,
+    "row_count": 25,
+    "rows_created_between": ["2026-09-17 16:01", "2026-09-19 13:54"],
+    "ddl_matches_v2": true,
+    "ddl_comparison": "production CREATE TABLE text is identical to the v2 IF NOT EXISTS definition (4 columns, same order)",
+    "foreign_keys_intact": {"customers_join": 25, "enrollment_tokens_join": 25},
+    "ciphertext_length": {"min": 184, "max": 184},
+    "decrypt_result": {"total": 25, "decrypted_ok": 21, "failed_invalid_token": 4, "unexpected_shape": 0},
+    "decrypt_schemes_present": {"http:": 19, "https:": 2},
+    "failing_customers": [
+      {"id": "cus_e5cb7c2077ea4871978198582b9e6a46", "name": "LanBridge LAN test 20260917", "kind": "internal-test"},
+      {"id": "cus_39bab970852c44808861e22bdf03fc23", "name": "LanBridge physical 1 20260917-234550", "kind": "internal-test"},
+      {"id": "cus_8c3c8c4288b9409f855c911b028e13b2", "name": "LanBridge physical 2 20260917-234550", "kind": "internal-test"},
+      {"id": "cus_59433ec2fc294f099a86a749e2cbda60", "name": "LanBridge source_proxy 1 20260917-234550", "kind": "internal-test"}
+    ],
+    "failing_customers_id_note": "IDs were first recorded as 12-char prefixes only; on 2026-09-30 they were resolved to full IDs by prefix lookup against the read-only production database",
+    "failing_customers_all_internal_test": true,
+    "failing_customers_real_customer_impact": "none",
+    "failing_window": "2026-09-17 23:40 to 23:45",
+    "root_cause_hypothesis": "service ran with a different master.key during that 5-minute window (rotation or alternate data dir); old key no longer available",
+    "customer_impact": "none to lines, devices or subscriptions; only the admin 'view address' convenience is affected; reissue restores visibility",
+    "error_record": "ERR-NET-040"
+  },
+
+  "not_verified": [
+    "real interactive admin login on production",
+    "30-day remember-me cookie Max-Age observed on production",
+    "CSRF re-authentication dialog flow on production",
+    "long-session soak",
+    "batch issuance used against real production customers",
+    "reverse-proxy entry real client IP semantics (remote_ip records the gateway address; X-Forwarded-For deliberately not trusted)"
+  ],
+
+  "untouched": [
+    "local machine (D321) network configuration",
+    "client programs and packages",
+    "repository frontend/ Fluent UI migration work (separate uncommitted change set)"
+  ]
+}

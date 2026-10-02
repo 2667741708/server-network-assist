@@ -5,7 +5,7 @@
   @include mat.theme(
     (
       color: (
-        primary: mat.$cyan-palette,
+        primary: mat.$blue-palette,
         tertiary: mat.$orange-palette,
       ),
       typography: Inter,
@@ -116,14 +116,16 @@ p {
   display: grid;
   gap: 5px;
 }
-.sidebar nav button,
-.mobile-nav button {
+.sidebar nav a,
+.mobile-nav a {
+  text-decoration: none;
+  font: inherit;
   border: 0;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
 }
-.sidebar nav button {
+.sidebar nav a {
   display: flex;
   gap: 13px;
   align-items: center;
@@ -131,18 +133,25 @@ p {
   border-radius: 10px;
   text-align: left;
 }
-.sidebar nav button span:first-child {
+.sidebar nav a span:first-child {
   width: 24px;
   color: #6f91a5;
   font-family: ui-monospace, monospace;
 }
-.sidebar nav button:hover,
-.sidebar nav button.active {
+.sidebar nav a:hover,
+.sidebar nav a.active {
   background: #142638;
   color: var(--text);
 }
-.sidebar nav button.active span:first-child {
+.sidebar nav a.active span:first-child {
   color: var(--accent);
+}
+.nav-section-label {
+  margin: 28px 8px 8px;
+  color: var(--muted);
+  font: 700 0.68rem ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 .sidebar-foot {
   margin-top: auto;
@@ -165,6 +174,45 @@ p {
 }
 .mobile-nav {
   display: none;
+}
+
+.business-shell {
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --line: #dbe3ec;
+  --text: #172333;
+  --muted: #607084;
+  --accent: #1967d2;
+  --accent-2: #c7791f;
+  --danger: #b42318;
+  color-scheme: light;
+  background: var(--bg);
+  color: var(--text);
+}
+.business-shell .sidebar {
+  background: #ffffff;
+  border-right-color: var(--line);
+  box-shadow: 2px 0 12px rgba(30, 61, 93, 0.04);
+}
+.business-shell .brand-mark {
+  background: linear-gradient(145deg, #2e7de9, #1556a8);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(25, 103, 210, 0.2);
+}
+.business-shell .sidebar nav a:hover,
+.business-shell .sidebar nav a.active {
+  background: #eaf2ff;
+  color: #17365d;
+}
+.business-shell .sidebar nav a.active span:first-child {
+  color: var(--accent);
+}
+.business-shell .content-area {
+  background: var(--bg);
+}
+.business-shell .top-progress {
+  --mdc-linear-progress-active-indicator-color: #1967d2;
 }
 .page-head {
   display: flex;
@@ -767,7 +815,7 @@ details summary {
     z-index: 10;
     overflow-x: auto;
   }
-  .mobile-nav button {
+  .mobile-nav a {
     min-width: 72px;
     flex: 1;
     padding: 9px 5px 10px;
@@ -775,7 +823,7 @@ details summary {
     gap: 3px;
     place-items: center;
   }
-  .mobile-nav button.active {
+  .mobile-nav a.active {
     color: var(--accent);
     background: #132638;
   }

@@ -28,8 +28,9 @@ class FakeManager:
     def measure(self, interface):
         self.measured.append(interface)
 
-    def reconcile(self, policies):
-        self.reconciled = policies
+    def reconcile(self, policies=None):
+        if policies is not None:
+            self.reconciled = policies
         return {'peers': {'lease-1': {}}}
 
 

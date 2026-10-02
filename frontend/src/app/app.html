@@ -6,7 +6,7 @@
 } @else if (!session()?.authenticated) {
   <app-login [passkeys]="!!session()?.passkeys" (authenticated)="bootstrap()" />
 } @else {
-  <div class="app-shell">
+  <div class="app-shell" [class.business-shell]="isCommercialPage(page()) || page() === 'audit' || page() === 'settings'">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark small">↗</div>
@@ -14,10 +14,19 @@
       </div>
       <nav aria-label="主导航">
         @for (item of nav; track item[0]) {
-          <button [class.active]="page() === item[0]" (click)="navigate(item[0])">
+          <a [class.active]="page() === item[0]" [href]="navigationHref(item[0])" [attr.data-smooth-view]="item[0]" [attr.aria-current]="page() === item[0] ? 'page' : null">
             <span aria-hidden="true">{{ item[2] }}</span
             ><span>{{ item[1] }}</span>
-          </button>
+          </a>
+        }
+      </nav>
+      <div class="nav-section-label">系统工具</div>
+      <nav aria-label="系统工具">
+        @for (item of toolNav; track item[0]) {
+          <a [class.active]="page() === item[0]" [href]="navigationHref(item[0])" [attr.data-smooth-view]="item[0]" [attr.aria-current]="page() === item[0] ? 'page' : null">
+            <span aria-hidden="true">{{ item[2] }}</span
+            ><span>{{ item[1] }}</span>
+          </a>
         }
       </nav>
       <div class="sidebar-foot">
@@ -25,23 +34,15 @@
         ><button mat-button (click)="logout()">退出登录</button>
       </div>
     </aside>
-    <main class="content-area">
+    <main class="content-area" tabindex="-1">
       @if (busy()) {
         <mat-progress-bar mode="indeterminate" class="top-progress" />
       }
       @if (error()) {
         <div class="alert error">{{ error() }}</div>
       }
+      @if (commercialVisited()) { <app-commercial [hidden]="!isCommercialPage(page())" [active]="isCommercialPage(page())" [section]="commercialSection()" /> }
       @switch (page()) {
-        @case ('overview') {
-          <app-overview
-            [hosts]="hosts()"
-            [profiles]="profiles()"
-            [probes]="probes()"
-            [navigate]="navigate"
-            [navigateCodex]="navigateCodex"
-          />
-        }
         @case ('hosts') {
           <app-hosts [hosts]="hosts()" [credentials]="credentials()" [profiles]="profiles()" (changed)="refresh()" />
         }
@@ -57,6 +58,7 @@
         @case ('terminal') {
           <app-terminal [hosts]="hosts()" />
         }
+
         @case ('codex') {
           <app-codex-chat
             [hosts]="hosts()"
@@ -80,11 +82,11 @@
       }
     </main>
     <nav class="mobile-nav" aria-label="移动端主导航">
-      @for (item of nav.slice(0, 8); track item[0]) {
-        <button [class.active]="page() === item[0]" (click)="navigate(item[0])">
+      @for (item of nav; track item[0]) {
+        <a [class.active]="page() === item[0]" [href]="navigationHref(item[0])" [attr.data-smooth-view]="item[0]" [attr.aria-current]="page() === item[0] ? 'page' : null">
           <span>{{ item[2] }}</span
           ><small>{{ item[1] }}</small>
-        </button>
+        </a>
       }
     </nav>
   </div>

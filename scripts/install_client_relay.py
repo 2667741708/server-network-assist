@@ -22,22 +22,27 @@ def main():
         raise RuntimeError("Run this installer as root on Linux")
     if not 10 <= args.interval <= 3600:
         raise ValueError("interval must be between 10 and 3600 seconds")
-    if urlsplit(args.control_url).scheme != "https":
-        raise ValueError("control-url must use HTTPS")
+    from server_network_assist.client_online import parse_enrollment_url
+    parse_enrollment_url(args.control_url.rstrip('/') + '/#enroll=validation-token-1234')
     token_file = Path(args.token_file).resolve()
     if not token_file.is_file() or token_file.is_symlink():
         raise ValueError("token-file must be a regular file, not a symlink")
     if token_file.stat().st_uid != 0:
         raise ValueError("token-file must be owned by root")
     token_file.chmod(0o600)
-    if not all(shutil.which(item) for item in ("wg", "tc", "nft", "systemctl")):
+    if not all(shutil.which(item) for item in ("ip", "wg", "tc", "nft", "systemctl")):
         raise RuntimeError("Install wireguard-tools, iproute2 and nftables first")
     import server_network_assist.client_relay_agent  # noqa: F401
+    modules = ('sch_htb', 'sch_ingress', 'cls_u32', 'act_police')
+    for module in modules:
+        subprocess.run(['modprobe', module], check=True)
+    Path('/etc/modules-load.d/server-network-assist-relay.conf').write_text('\n'.join(modules) + '\n', encoding='ascii')
     data = Path("/var/lib/server-network-assist-relay")
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     service = Path("/etc/systemd/system/server-network-assist-relay.service")
     timer = Path("/etc/systemd/system/server-network-assist-relay.timer")
-    executable = str(Path(sys.executable).resolve())
+    # Resolving the venv symlink would silently select system Python instead.
+    executable = os.path.abspath(sys.executable)
     service.write_text("\n".join([
         "[Unit]", "Description=Measure and reconcile customer WireGuard relay",
         "After=network-online.target", "Wants=network-online.target", "",

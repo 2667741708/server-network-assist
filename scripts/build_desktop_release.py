@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def distributions():
     pending = ['aiohttp==3.14.0', 'asyncssh==2.23.0', 'cryptography==46.0.5',
-               'webauthn==2.7.0', 'pystray==0.19.5', 'Pillow==12.3.0']
+               'webauthn==2.7.0', 'pystray==0.19.5', 'Pillow==12.3.0', 'PyYAML==6.0.3']
     seen = {}
     while pending:
         requirement = Requirement(pending.pop())

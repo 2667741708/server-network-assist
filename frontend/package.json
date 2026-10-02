@@ -6,8 +6,12 @@
     "start": "ng serve",
     "build": "ng build",
     "e2e": "node e2e-smoke.cjs",
+    "e2e:commercial": "node commercial-ui-smoke.cjs",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "prebuild": "node prepare-navigation.cjs",
+    "prestart": "node prepare-navigation.cjs",
+    "lint:navigation": "node lint-navigation.cjs"
   },
   "private": true,
   "packageManager": "npm@11.12.1",

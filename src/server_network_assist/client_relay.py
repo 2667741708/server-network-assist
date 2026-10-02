@@ -185,6 +185,24 @@ def relay_policy_fingerprint(value: object) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+_DATAPLANE_POLICY_FIELDS = (
+    "peer_id", "public_key", "address", "interface", "egress_interface",
+    "egress_policy", "customer_subnet", "management_subnets",
+    "download_bps", "upload_bps", "tunnel_probe_address", "tunnel_probe_port",
+    "probe_only", "probe_echo_addresses",
+)
+
+
+def _same_dataplane_policy(left: dict, right: dict) -> bool:
+    """Compare packet/routing configuration while ignoring authorization metadata."""
+    return all(left.get(key) == right.get(key) for key in _DATAPLANE_POLICY_FIELDS)
+
+
+def _same_wireguard_identity(left: dict, right: dict) -> bool:
+    return all(left.get(key) == right.get(key)
+               for key in ("interface", "address", "public_key"))
+
+
 def parse_wg_transfer(output: str) -> dict[str, dict[str, int]]:
     """Parse ``wg show INTERFACE transfer`` into counters keyed by public key."""
     result = {}
@@ -730,6 +748,37 @@ class RelayManager:
         if install and not present:
             self.runner(self._physical_rule(policy, "add"), check=True)
 
+    def _read_interface_peer_state(self, interface: str) -> tuple[dict[str, str], set[str]]:
+        """Read current WireGuard AllowedIPs and customer routes without changing them."""
+        peer_result = self.runner(["wg", "show", interface, "allowed-ips"], check=True)
+        allowed_ips = {}
+        for line in str(peer_result.stdout or "").splitlines():
+            fields = line.split("\t")
+            if len(fields) != 2 or not PUBLIC_KEY_RE.fullmatch(fields[0]):
+                raise RuntimeError("cannot verify current WireGuard peer configuration")
+            allowed_ips[fields[0]] = fields[1]
+        route_result = self.runner(["ip", "-4", "route", "show", "dev", interface], check=True)
+        routes = set()
+        for line in str(route_result.stdout or "").splitlines():
+            fields = line.split()
+            if not fields:
+                continue
+            try:
+                routes.add(str(ipaddress.ip_interface(fields[0]).network))
+            except ValueError:
+                continue
+        return allowed_ips, routes
+
+    def _repair_peer_if_missing(self, policy: dict, interface_state: tuple[dict[str, str], set[str]]) -> None:
+        allowed_ips, routes = interface_state
+        if allowed_ips.get(policy["public_key"]) != policy["address"]:
+            self.runner(["wg", "set", policy["interface"], "peer", policy["public_key"],
+                         "allowed-ips", policy["address"]], check=True)
+        route = str(ipaddress.ip_interface(policy["address"]).network)
+        if route not in routes:
+            self.runner(["ip", "route", "replace", policy["address"],
+                         "dev", policy["interface"]], check=True)
+
     def _remove_physical_route(self, policy: dict, *, owned: bool) -> None:
         if policy["egress_policy"] != "source_physical" or not owned:
             return
@@ -798,6 +847,15 @@ class RelayManager:
             # bytes, but the same relay lease keeps its original local
             # counter baseline.  Otherwise those bytes would be counted twice.
             policy["usage_baseline_bytes"] = old_policy.get("usage_baseline_bytes", 0)
+            if previous.get("status") == "active" and _same_dataplane_policy(old_policy, policy):
+                # Expiry, quota and signed-snapshot timestamps are local
+                # authorization metadata. Persist them without touching the
+                # running peer, route, firewall or traffic-control state.
+                refreshed = dict(previous)
+                refreshed.update(policy=policy, updated_at=now)
+                state["peers"][policy["peer_id"]] = refreshed
+                self.store.save(state)
+                return refreshed
         for other_id, reserved in state['peers'].items():
             if other_id == policy['peer_id'] or reserved.get('status') not in {'active', 'recovery_required'}:
                 continue
@@ -825,6 +883,12 @@ class RelayManager:
                 raise ValueError("peer_id traffic-control class collision")
         physical_owned = bool(previous and previous.get("physical_rule_owned"))
         self._ensure_physical_route(policy, owned=physical_owned, install=False)
+        stable_wireguard_identity = bool(
+            previous and previous.get("status") == "active" and
+            _same_wireguard_identity(previous["policy"], policy))
+        if stable_wireguard_identity:
+            self._repair_peer_if_missing(
+                policy, self._read_interface_peer_state(policy["interface"]))
         # Reconciliation may update a peer before the independent usage POST
         # receives its ACK.  Preserve its persisted report and counter watermarks
         # even in the interim recovery record, so a crash cannot erase billing.
@@ -861,6 +925,11 @@ class RelayManager:
                 probe = self.runner(['tc', '-j', 'qdisc', 'show', 'dev', policy['interface']], check=True)
                 existing_qdiscs = json.loads(probe.stdout or '[]')
             for command in plan_apply(policy, initialize=not initialized):
+                if stable_wireguard_identity and command[:2] == ["wg", "set"]:
+                    continue
+                if (stable_wireguard_identity and command[:3] == ["ip", "route", "replace"] and
+                        command[3:] == [policy["address"], "dev", policy["interface"]]):
+                    continue
                 if command[:3] == ['tc', 'qdisc', 'replace']:
                     kind, handle = ('htb', '1:') if 'root' in command else ('ingress', 'ffff:')
                     if any(row.get('kind') == kind and row.get('handle') == handle for row in existing_qdiscs):
@@ -1095,20 +1164,28 @@ class RelayManager:
                 if record.get("status") in {"active", "recovery_required"} and peer_id not in policies:
                     self.revoke(peer_id, "not_desired")
             state = self.store.load()
+            interface_states: dict[str, tuple[dict[str, str], set[str]]] = {}
             for peer_id, item in policies.items():
                 current = state["peers"].get(peer_id)
-                if not current or current.get("status") != "active" or current.get("policy") != item:
+                if not current or current.get("status") != "active":
                     self.apply(item)
-                else:
-                    # Restore owned peer/return route if an interrupted cleanup removed them.
-                    self.runner(['ip', 'route', 'replace', item['address'], 'dev', item['interface']], check=True)
-                    self.runner(['wg', 'set', item['interface'], 'peer', item['public_key'], 'allowed-ips', item['address']], check=True)
-                    self._ensure_physical_route(item,
-                                                owned=bool(current.get('physical_rule_owned')))
-                    if item['egress_policy'] == 'source_physical' and not current.get('physical_rule_owned'):
-                        current['physical_rule_owned'] = True
-                        state['peers'][peer_id] = current
-                        self.store.save(state)
+                    continue
+                if not _same_dataplane_policy(current["policy"], item):
+                    self.apply(item)
+                    continue
+                if current.get("policy") != item:
+                    current = self.apply(item)
+                self._ensure_physical_route(item,
+                                            owned=bool(current.get('physical_rule_owned')))
+                interface = item["interface"]
+                if interface not in interface_states:
+                    interface_states[interface] = self._read_interface_peer_state(interface)
+                self._repair_peer_if_missing(item, interface_states[interface])
+                if item['egress_policy'] == 'source_physical' and not current.get('physical_rule_owned'):
+                    current['physical_rule_owned'] = True
+                    state = self.store.load()
+                    state['peers'][peer_id] = current
+                    self.store.save(state)
         state = self.store.load()
         for peer_id, record in list(state["peers"].items()):
             if record.get("status") != "active":

@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -21,6 +21,9 @@ import { Host, NetworkProfile, ProbeResult } from './models';
       .probe-heading > * {
         min-width: 0;
       }
+      .profile-item { flex-wrap: wrap; }
+      .profile-item > span { min-width: 0; }
+      .state-badge { white-space: normal; overflow-wrap: anywhere; }
     `,
   ],
   imports: [
@@ -49,6 +52,11 @@ import { Host, NetworkProfile, ProbeResult } from './models';
       <div class="alert" [class.error]="failed()">{{ message() }}</div>
     }
     <section class="panel-section">
+      <mat-form-field appearance="outline">
+        <mat-label>原网络回程测试地址（可选 IPv4）</mat-label>
+        <input matInput [(ngModel)]="returnTarget" placeholder="填写访问客户端的校园网 IP" />
+      </mat-form-field>
+      <p>填写你电脑的校园网 IP 后点击“探测全部主机”。回程路径用于判断服务器是否误将回复发入 VPN。结果有效期为两分钟。</p>
       <div class="section-title">
         <div>
           <h2>连通性检查</h2>
@@ -68,7 +76,7 @@ import { Host, NetworkProfile, ProbeResult } from './models';
             <div class="probe-status">
               <span [class.ok]="result(host.id)?.ssh">SSH</span
               ><span [class.ok]="result(host.id)?.dns">DNS</span
-              ><span [class.ok]="result(host.id)?.internet">直连公网</span
+              ><span [class.ok]="result(host.id)?.internet">公网可用</span>
               ><span [class.ok]="result(host.id)?.helper">辅助程序</span>
               @if (result(host.id)?.os === 'Windows') {
                 <span [class.ok]="result(host.id)?.system_internet">系统应用联网</span>
@@ -87,6 +95,21 @@ import { Host, NetworkProfile, ProbeResult } from './models';
             <p class="long-value">
               {{ result(host.id)?.error || result(host.id)?.default_route || '尚未探测' }}
             </p>
+            @if (result(host.id)?.checked_at) {
+              <p class="long-value">探测时间：{{ checkedTime(result(host.id)?.checked_at) }}</p>
+            }
+            @if (result(host.id)?.public_route) {
+              <p class="mono long-value">公网实际路径：{{ result(host.id)?.public_route }}</p>
+            }
+            @if (result(host.id)?.return_route) {
+              <p class="mono long-value">指定地址回程：{{ result(host.id)?.return_route }}</p>
+            }
+            @for (warning of result(host.id)?.route_warnings || []; track warning) {
+              <p class="alert error long-value">{{ warning }}</p>
+            }
+            @for (assist of result(host.id)?.assist || []; track assist.profile_id) {
+              <p class="long-value">{{ assist.interface }}：{{ assist.active ? '接口存在' : '接口已关闭' }}；{{ assist.desired ? '维护已启用' : '维护未启用' }}</p>
+            }
           </mat-card>
         } @empty {
           <div class="empty-state">请先在“主机与凭据”页添加主机。</div>
@@ -116,7 +139,7 @@ import { Host, NetworkProfile, ProbeResult } from './models';
                 class="state-badge"
                 [class.enabled]="profile.state === 'enabled'"
                 [class.error]="profile.state === 'error'"
-                >{{ stateText(profile.state) }}</span
+                >记录：{{ stateText(profile.state) }}；实际：{{ runtimeText(profileRuntimeStatus(profile)) }}</span>
               >
             </button>
           } @empty {
@@ -126,6 +149,16 @@ import { Host, NetworkProfile, ProbeResult } from './models';
       </section>
       <mat-card class="editor-card">
         <h2>{{ draft.id ? '方案设置' : '新建借网方案' }}</h2>
+        @if (currentRuntime?.mismatch) {
+          <div class="alert error long-value">方案记录与客户端真实状态不同。请查看各节点状态；不要重复开启另一套全局 VPN。</div>
+        }
+        @for (node of currentRuntime?.nodes || []; track node.host_id) {
+          <p class="long-value">{{ hostName(node.host_id) }}：{{ runtimeText(node.status) }}；{{ checkedTime(node.checked_at) }}</p>
+          @if (node.external_tunnels.length) {
+            <p class="alert error long-value">其他全局隧道：{{ node.external_tunnels.join('、') }}。切换借网方案前，先退出它们的借网模式，保留管理专用连接。</p>
+          }
+          @if (node.last_error) { <p class="alert error long-value">{{ node.last_error }}</p> }
+        }
         <div class="form-grid">
           <mat-form-field appearance="outline" class="wide"
             ><mat-label>方案名称</mat-label><input matInput [(ngModel)]="draft.name"
@@ -228,7 +261,7 @@ import { Host, NetworkProfile, ProbeResult } from './models';
     </div>
   `,
 })
-export class NetworkComponent {
+export class NetworkComponent implements OnDestroy {
   @Input({ required: true }) hosts: Host[] = [];
   @Input({ required: true }) profiles: NetworkProfile[] = [];
   @Input({ required: true }) probes: ProbeResult[] = [];
@@ -239,6 +272,10 @@ export class NetworkComponent {
   readonly failed = signal(false);
   draft = this.emptyProfile();
   preserveText = '';
+  returnTarget = '';
+  readonly now = signal(Math.floor(Date.now() / 1000));
+  private readonly freshnessTimer = setInterval(() => this.now.set(Math.floor(Date.now() / 1000)), 15000);
+  ngOnDestroy() { clearInterval(this.freshnessTimer); }
   constructor(private readonly api: ApiService) {}
   get clientChoices() {
     return this.hosts.filter((value) => value.id !== this.draft.gateway_id);
@@ -271,6 +308,22 @@ export class NetworkComponent {
   }
   result(id: string) {
     return this.probes.find((value) => value.id === id);
+  }
+  get currentRuntime() {
+    const profile = this.profiles.find((p) => p.id === this.draft.id);
+    if (!profile?.runtime) return undefined;
+    return { ...profile.runtime, nodes: profile.runtime.nodes.map((node) => ({ ...node, status: node.checked_at >= this.now() - 120 ? node.status : 'unknown' })) };
+  }
+  profileRuntimeStatus(profile: NetworkProfile) {
+    const nodes = profile.runtime?.nodes || [];
+    const statuses = new Set(nodes.map((node) => node.checked_at >= this.now() - 120 ? node.status : 'unknown'));
+    return statuses.size === 1 ? [...statuses][0] : statuses.size ? 'mixed' : 'unknown';
+  }
+  checkedTime(value?: number) {
+    return value ? new Date(value * 1000).toLocaleString() : '尚未探测';
+  }
+  runtimeText(value?: string) {
+    return ({ enabled: '运行中', disabled: '已关闭', not_configured: '未配置', suspended: '已暂停', inconsistent: '状态不一致', mixed: '节点状态不同', unknown: '待探测或已过期' } as Record<string, string>)[value || 'unknown'] || value;
   }
   hostName(id: string) {
     return this.hosts.find((value) => value.id === id)?.name || id;
@@ -310,11 +363,12 @@ export class NetworkComponent {
   probeAll() {
     this.busy.set(true);
     this.api
-      .post<{ results: ProbeResult[] }>('/api/network/probe', { ids: this.hosts.map((v) => v.id) })
+      .post<{ results: ProbeResult[] }>('/api/network/probe', { ids: this.hosts.map((v) => v.id), return_target: this.returnTarget.trim() })
       .subscribe({
         next: (value) => {
           this.busy.set(false);
           this.probesChanged.emit(value.results);
+          this.changed.emit();
           this.notify('探测完成');
         },
         error: (e) => {

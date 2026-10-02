@@ -1,0 +1,463 @@
+{
+  "tested_on": "d321-titan / DESKTOP-TD6B9GN",
+  "operator_network_mutations": false,
+  "tests": {
+    "mobile-final-rule": {
+      "mode": "rule",
+      "tun": false,
+      "system_proxy": {
+        "supported": true,
+        "enabled": true,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      },
+      "wininet_application": 200
+    },
+    "mobile-final-global": {
+      "mode": "global",
+      "tun": false,
+      "system_proxy": {
+        "supported": true,
+        "enabled": true,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      },
+      "wininet_application": 200
+    },
+    "mobile-final-direct": {
+      "mode": "direct",
+      "tun": false,
+      "system_proxy": {
+        "supported": true,
+        "enabled": true,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 52,
+          "error": "curl: (52) Empty reply from server"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      },
+      "wininet_application": 200
+    },
+    "mobile-final-rule-tun": {
+      "mode": "rule",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "mobile-final-global-tun": {
+      "mode": "global",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "mobile-final-direct-tun": {
+      "mode": "direct",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5009 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "campus-own-rule-final": {
+      "mode": "rule",
+      "tun": false,
+      "system_proxy": {
+        "supported": true,
+        "enabled": true,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 35,
+          "error": "curl: (35) schannel: failed to receive handshake, SSL/TLS connection failed"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      },
+      "wininet_application": 200
+    },
+    "campus-own-global-final": {
+      "mode": "global",
+      "tun": false,
+      "system_proxy": {
+        "supported": true,
+        "enabled": true,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5001 milliseconds"
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5016 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5002 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      },
+      "wininet_application": "<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1032)>"
+    },
+    "campus-own-direct-final": {
+      "mode": "direct",
+      "tun": false,
+      "system_proxy": {
+        "supported": true,
+        "enabled": true,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5001 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5000 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      },
+      "wininet_application": 200
+    },
+    "campus-own-rule-tun-final": {
+      "mode": "rule",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "campus-own-global-tun-final": {
+      "mode": "global",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5006 milliseconds"
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5005 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "campus-own-direct-tun-final": {
+      "mode": "direct",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5005 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "borrow-own-final-rule-tun": {
+      "mode": "rule",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "200",
+          "exit": 0,
+          "error": ""
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5013 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    },
+    "borrow-own-final-global-tun": {
+      "mode": "global",
+      "tun": true,
+      "system_proxy": {
+        "supported": true,
+        "enabled": false,
+        "server": "127.0.0.1:7897"
+      },
+      "sites": {
+        "https://www.baidu.com": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5004 milliseconds"
+        },
+        "https://github.com/robots.txt": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5005 milliseconds"
+        },
+        "https://api.github.com/rate_limit": {
+          "code": "000",
+          "exit": 28,
+          "error": "curl: (28) Connection timed out after 5005 milliseconds"
+        }
+      },
+      "campus": {
+        "10.20.32.12": true,
+        "10.20.32.13": true,
+        "10.20.32.14": true
+      }
+    }
+  },
+  "final_restoration": {
+    "passed": true,
+    "checks": {
+      "routes_exact": true,
+      "dns_exact": true,
+      "proxy_exact": true,
+      "no_customer_adapter": true,
+      "no_customer_service": true,
+      "no_owned_state": true,
+      "clash_exact": true,
+      "campus_ssh": true
+    },
+    "proxy": 0,
+    "mode": "rule",
+    "tun": false,
+    "management_retained": true
+  }
+}

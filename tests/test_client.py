@@ -137,75 +137,52 @@ class ClientPanelTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    @patch('server_network_assist.client.probe_line', return_value={'id': 'line-1', 'reachable': True, 'latency_ms': 5})
     @patch('server_network_assist.client.change_tunnel')
-    @patch('server_network_assist.client.native_status')
-    def test_only_authorized_installed_line_can_connect(self, native, change, probe):
-        native.return_value = {'elevated': True, 'tunnels': [
-            {'name': 'customer-line-1', 'active': False}, {'name': 'admin-secret', 'active': False}]}
-        with patch.object(self.panel, 'payload', return_value=payload()):
-            self.panel.connect('line-1')
-            change.assert_called_once_with('customer-line-1', 'connect')
-            change.reset_mock()
-            with self.assertRaisesRegex(ValueError, '未获授权'):
-                self.panel.connect('admin-secret')
-            change.assert_not_called()
-
-    @patch('server_network_assist.client.connectivity', return_value={'ok': True, 'milliseconds': 3})
-    @patch('server_network_assist.client.change_tunnel')
-    @patch('server_network_assist.client.native_status')
-    def test_disconnect_rechecks_original_network(self, native, change, connectivity):
-        native.return_value = {'elevated': True, 'tunnels': [{'name': 'customer-line-1', 'active': True}]}
-        with patch.object(self.panel.subscription, 'cached', return_value=payload()):
-            result = self.panel.disconnect('line-1')
-        self.assertTrue(result['original_network']['ok'])
-        change.assert_called_once_with('customer-line-1', 'disconnect')
-
-    @patch('server_network_assist.client.probe_line', return_value={'id': 'line-2', 'reachable': True, 'latency_ms': 5})
-    @patch('server_network_assist.client.change_tunnel')
-    @patch('server_network_assist.client.native_status')
-    def test_failed_line_switch_restores_previous_tunnel(self, native, change, probe):
-        value = payload()
-        value['lines'].append({**value['lines'][0], 'id': 'line-2', 'name': '备用', 'tunnel': 'customer-line-2'})
-        native.return_value = {'elevated': True, 'tunnels': [
-            {'name': 'customer-line-1', 'active': True}, {'name': 'customer-line-2', 'active': False}]}
-        self.panel.save_active('line-1')
-        change.side_effect = [None, RuntimeError('failed'), None]
+    def test_signed_static_subscription_cannot_control_management_tunnel(self, change):
+        value = payload(); value['lines'][0]['tunnel'] = 'fleet-titan'
         with patch.object(self.panel, 'payload', return_value=value):
-            with self.assertRaisesRegex(RuntimeError, 'failed'):
-                self.panel.connect('line-2')
-        self.assertEqual(change.call_args_list[0].args, ('customer-line-1', 'disconnect'))
-        self.assertEqual(change.call_args_list[-1].args, ('customer-line-1', 'connect'))
+            with self.assertRaisesRegex(ValueError, '旧静态'):
+                self.panel.connect('line-1')
+        change.assert_not_called()
 
     @patch('server_network_assist.client.change_tunnel')
-    def test_expiry_reconciliation_stops_recorded_tunnel(self, change):
-        self.panel.save_active('line-1', 'customer-line-1')
+    def test_static_disconnect_cannot_control_management_tunnel(self, change):
+        with self.assertRaisesRegex(ValueError, '所有权'):
+            self.panel.disconnect('line-1')
+        change.assert_not_called()
+
+    @patch('server_network_assist.client.change_tunnel')
+    def test_static_expiry_preserves_unowned_management_tunnel_and_retry_state(self, change):
+        self.panel.save_active('line-1', 'fleet-titan')
         with patch.object(self.panel.subscription, 'cached', side_effect=ValueError('订阅已经过期')):
-            self.panel.reconcile()
-        change.assert_called_once_with('customer-line-1', 'disconnect')
-        self.assertIsNone(self.panel.active())
+            with self.assertRaisesRegex(RuntimeError, '所有权'):
+                self.panel.reconcile()
+        change.assert_not_called()
+        self.assertIsNotNone(self.panel.active())
+        self.assertTrue(self.panel.leaving_path.exists())
 
     @patch('server_network_assist.client.change_tunnel')
-    def test_line_level_expiry_reconciliation_stops_recorded_tunnel(self, change):
-        value = payload()
-        value['lines'][0]['expires_at'] = int(time.time()) - 1
-        self.panel.save_active('line-1', 'customer-line-1')
-        with patch.object(self.panel.subscription, 'cached', return_value=value):
-            self.panel.reconcile()
-        change.assert_called_once_with('customer-line-1', 'disconnect')
-        self.assertIsNone(self.panel.active())
+    def test_static_remove_cannot_remove_unowned_management_tunnel(self, change):
+        self.panel.save_active('line-1', 'fleet-titan')
+        with patch.object(self.panel.subscription, 'remove') as remove:
+            with self.assertRaisesRegex(RuntimeError, '所有权'):
+                self.panel.remove_subscription()
+        remove.assert_not_called(); change.assert_not_called()
+
+    def test_static_update_does_not_clear_online_active_connection(self):
+        self.panel.save_active('grant', 'sna0123456789ab', 'online')
+        with patch.object(self.panel.subscription, 'cached', return_value=payload()), patch.object(self.panel.subscription, 'update', return_value=payload()):
+            self.panel.update_subscription()
+        self.assertEqual(self.panel.active()['kind'], 'online')
 
     @patch('server_network_assist.client.change_tunnel')
-    def test_replacing_subscription_stops_old_line_before_changing_key(self, change):
-        current = payload()
-        self.panel.save_active('line-1', 'customer-line-1')
-        with patch.object(self.panel.subscription, 'cached', return_value=current), \
-             patch.object(self.panel.subscription, 'save_url') as save, \
-             patch.object(self.panel.subscription, 'update', return_value=current):
-            self.panel.replace_subscription('https://new.example.test/sub#key=value')
-        change.assert_called_once_with('customer-line-1', 'disconnect')
-        save.assert_called_once()
-        self.assertIsNone(self.panel.active())
+    def test_replacing_subscription_does_not_modify_unowned_management_tunnel(self, change):
+        value = payload(); value['lines'][0]['tunnel'] = 'fleet-titan'
+        self.panel.save_active('line-1', 'fleet-titan')
+        with patch.object(self.panel.subscription, 'cached', return_value=value), patch.object(self.panel.subscription, 'save_url') as save:
+            with self.assertRaisesRegex(RuntimeError, '所有权'):
+                self.panel.replace_subscription('https://new.example.test/sub#key=value')
+        change.assert_not_called(); save.assert_not_called()
 
 
 class ClientHTTPTests(unittest.TestCase):
@@ -233,7 +210,7 @@ class ClientHTTPTests(unittest.TestCase):
     def test_assets_are_offline_and_api_is_authenticated(self):
         with self.request('/', token=False) as response:
             body = response.read().decode()
-        self.assertIn('借网客户端', body)
+        self.assertIn('纯享入网', body)
         self.assertNotIn(self.panel.token, body)
         for asset in ('/client.js', '/client.css', '/framework7-bundle.min.js'):
             with self.request(asset, token=False) as response:
@@ -247,6 +224,34 @@ class ClientHTTPTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as result:
                 self.request(path)
             self.assertEqual(result.exception.code, 404)
+
+    def test_readonly_access_api_requires_client_authentication(self):
+        from unittest.mock import Mock
+        self.panel.access_report = Mock(return_value={'ready':False})
+        with self.request('/api/network/access') as response:
+            self.assertEqual(json.load(response), {'ready':False})
+        with self.assertRaises(HTTPError) as result:
+            self.request('/api/network/access', token=False)
+        self.assertEqual(result.exception.code, 403)
+        self.panel.access_report.assert_called_once()
+
+    def test_show_ui_is_authenticated_and_does_not_take_network_lock(self):
+        from unittest.mock import Mock
+        self.panel.ui_activate = Mock(return_value=True)
+        self.panel.lock = Mock()
+        self.panel.leave_network = Mock()
+        headers = {'X-Client-Token': self.panel.token, 'Origin': self.panel.origin}
+        with self.opener.open(Request(self.panel.origin + '/api/ui/show', data=b'{}', headers=headers), timeout=3) as response:
+            self.assertEqual(json.load(response), {'shown': True})
+        self.panel.ui_activate.assert_called_once()
+        self.panel.lock.assert_not_called()
+        self.panel.leave_network.assert_not_called()
+        for bad in ({'Origin': self.panel.origin}, {'X-Client-Token': self.panel.token},
+                    {'X-Client-Token': self.panel.token, 'Origin': 'https://untrusted.example'}):
+            with self.assertRaises(HTTPError) as result:
+                self.opener.open(Request(self.panel.origin + '/api/ui/show', data=b'{}', headers=bad), timeout=3)
+            self.assertEqual(result.exception.code, 403)
+        self.panel.ui_activate.assert_called_once()
 
 
 if __name__ == '__main__':

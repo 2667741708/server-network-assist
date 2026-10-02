@@ -1,0 +1,267 @@
+// Headless Framework7 UI fixtures. Never contact or operate an actual client/server.
+const { chromium } = require('../frontend/node_modules/playwright');
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '..');
+const ui = path.join(root, 'src/server_network_assist/client_ui');
+const csp = fs.readFileSync(path.join(root,'src/server_network_assist/client.py'),'utf8').match(/self\.send_header\('Content-Security-Policy', "([^"]+)"\)/)[1];
+const assets = new Set(['index.html','client.js','client.css','framework7-bundle.min.js','framework7-bundle.min.css','framework7-default-theme.css','smooth-navigation.js','smooth-navigation.css']);
+let configured=false, active=null, recovering=false, stateFail=false, catalogFail=false, enrollmentDelay=0, stateDelay=0;
+let nodes=[{id:'grant-1',name:'C201-4090 商业源网',endpoint:'10.20.32.13:51910',download_bps:null,upload_bps:null},{id:'grant-2',name:'第二源网',endpoint:'192.0.2.1:51910',download_bps:50000000,upload_bps:10000000}];
+let events=[], desktopNotifications=true, subscriptions=[], subscriptionCounter=0; const posts=[], errors=[];
+let sourceQueries=0;
+nodes[0].egress_mode='physical';nodes[1].egress_mode='source_proxy';
+const usage={remaining_bytes:null,used_bytes:1024,period_end:1792165490};
+const traffic={today_bytes:1024*1024,total_bytes:1024*1024*1024,download_bytes_per_second:1024*1024,upload_bytes_per_second:1024*128,measured_since:1789600000};
+function fixtureState(){return {hostname:'本机测试设备',version:'0.7.0',traffic,saved_subscriptions:subscriptions.map(row=>({...row})),preferences:{desktop_notifications:desktopNotifications},online_service:{configured,customer:{display_name:'测试客户'},lease:active?{id:'private-lease',expires_at:1}:null},subscription:{configured:false},lines:[],active,recovering,error:null,network_events:events};}
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+(async()=>{
+  const browser=await chromium.launch({headless:true});
+  try {
+    const page=await browser.newPage({viewport:{width:580,height:820}});
+    let loadIndex=0;
+    const load=()=>page.goto('http://client-preview.test/?case='+(++loadIndex)+'#token=fixture-no-secret',{waitUntil:'networkidle'});
+    page.on('pageerror',e=>errors.push(e.message));
+    await page.route('**/*',async route=>{
+      const url=new URL(route.request().url());
+      assert.equal(url.hostname,'client-preview.test','No real network targets allowed');
+      const pathname=url.pathname;
+      if(!pathname.startsWith('/api/')){
+        const name=pathname==='/'?'index.html':pathname.slice(1);
+        if(!assets.has(name))return route.fulfill({status:204,body:''});
+        return route.fulfill({body:fs.readFileSync(path.join(name.startsWith('smooth-navigation.')?path.join(root,'src/server_network_assist/subscription_admin_ui'):ui,name)),headers:{'Content-Security-Policy':csp},contentType:name.endsWith('.html')?'text/html; charset=utf-8':name.endsWith('.css')?'text/css':'application/javascript'});
+      }
+      assert.equal(route.request().headers()['x-client-token'],'fixture-no-secret');
+      if(route.request().method()==='POST')posts.push({path:pathname,body:route.request().postDataJSON()});
+      if(pathname==='/api/state'){const captured=fixtureState();await pause(stateDelay);return route.fulfill({status:stateFail?503:200,json:stateFail?{error:'模拟状态读取失败'}:captured});}
+      if(pathname==='/api/online/subscription')return route.fulfill({status:catalogFail?503:200,json:catalogFail?{error:'模拟服务离线'}:{routes:nodes,usage}});
+      if(pathname==='/api/network/source-status'){
+        sourceQueries++;await pause(150);
+        return route.fulfill({json:{ready:false,network:'有线 · 任意IPv4物理网卡\n192.168.63.249',service:'订阅授权已读取',source:'TCP服务可达，UDP握手待入网验证',sources:nodes.map(n=>({...n,reachable:true,latency_ms:12.3})),message:'只读查询'}});
+      }
+      if(pathname==='/api/online/subscriptions/add'){
+        await pause(enrollmentDelay);const value=route.request().postDataJSON();
+        const row={id:'subscription-'+(++subscriptionCounter),label:value.label||'校园月度套餐',provider:'10.20.32.13',customer_id:'customer-'+subscriptionCounter,enrolled_at:1789600000,selected:!configured,egress_modes:[subscriptionCounter===1?'physical':'source_proxy']};
+        subscriptions.push(row);configured=true;return route.fulfill({json:{ok:true,subscription_id:row.id}});
+      }
+      if(pathname==='/api/online/subscriptions/select'){active=null;subscriptions.forEach(row=>row.selected=row.id===route.request().postDataJSON().subscription_id);configured=true;return route.fulfill({json:{ok:true}});}
+      if(pathname==='/api/online/subscriptions/remove'){
+        const id=route.request().postDataJSON().subscription_id;
+        if(subscriptions.find(row=>row.id===id)?.selected){active=null;configured=false;}
+        subscriptions=subscriptions.filter(row=>row.id!==id);return route.fulfill({json:{ok:true}});
+      }
+      if(pathname==='/api/online/subscriptions/import')return route.fulfill({json:{ok:true,imported:0,skipped:1}});
+      if(pathname==='/api/online/connect'){await pause(200);active={kind:'online',line_id:route.request().postDataJSON().grant_id};return route.fulfill({json:{ok:true}});}
+      if(pathname==='/api/network/leave'){active=null;recovering=false;return route.fulfill({json:{ok:true}});}
+      if(pathname==='/api/preferences/notifications'){desktopNotifications=route.request().postDataJSON().desktop_notifications;return route.fulfill({json:{desktop_notifications:desktopNotifications}});}
+      if(pathname==='/api/network/access')return route.fulfill({json:{ready:false,network:'很长的无线接入名称'.repeat(20)+'\n192.168.43.2',campus:'当前不满足校园接入条件',service:'请先读取订阅',account:'未检查',message:'热点优先，保持原网络，不启动借网。'}});
+      if(pathname==='/api/network/wifiscan')return route.fulfill({json:{supported:true,message:'Windows 最新无线列表；名称不能证明校园可达',networks:[{ssid:'很长的校园无线名称'.repeat(30)+'<安全文本>',interface:'无线网卡'.repeat(30),signal:81,secure:true,connected:true,connectable:true},...Array.from({length:20},(_,i)=>({ssid:'附近无线网络'+i,interface:'Wi-Fi',signal:50,secure:true,connected:false,connectable:true}))]}});
+      if(pathname==='/api/network/campus-logout')return route.fulfill({json:{ok:true,after:'offline',logout_requested:true,message:'已验证个人校园账号下线，Wi-Fi 保持连接。请检查源网后手动开始入网。'}});
+      throw new Error('Unexpected fixture API '+pathname);
+    });
+    await load();
+    assert.equal(sourceQueries,0,'No subscription means no source query');
+    assert.equal(await page.locator('#traffic-today').innerText(),'1.0 MB');
+    assert.equal(await page.locator('#traffic-total').innerText(),'1.0 GB');
+    assert.match(await page.locator('#traffic-speed').innerText(),/1.0 MB \/s ↓.*128.0 KB \/s ↑/);
+    assert.match(await page.locator('#traffic-note').innerText(),/本机此订阅隧道统计/);
+    assert.equal(await page.locator('#subscription-history > a').getAttribute('aria-expanded'),'false');
+    assert.equal(await page.locator('.page-content > :first-child').getAttribute('id'),'subscription-settings');
+    assert.equal(await page.locator('#subscription-form').isVisible(),true,'Add subscription must not require expanding settings');
+    assert.equal(await page.locator('#read-subscription').evaluate(e=>{const r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight}),true,'Add subscription must be visible in the first viewport');
+    await page.screenshot({path:path.join(root,'artifacts/client-subscription-top-580.png')});
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.locator('#read-subscription').evaluate(e=>e.getBoundingClientRect().bottom<=innerHeight),true,'Add subscription must fit the narrow first viewport');
+    await page.screenshot({path:path.join(root,'artifacts/client-subscription-top-390.png')});
+    await page.setViewportSize({width:580,height:820});
+    assert.equal(await page.locator('#window-controls').isVisible(),false,'Browser previews must not show dead native controls');
+    await page.evaluate(()=>{
+      window.nativeCalls=[];
+      window.pywebview={api:Object.fromEntries(['minimize','toggle_maximize','close'].map(name=>[name,async()=>window.nativeCalls.push(name)]))};
+      window.dispatchEvent(new Event('pywebviewready'));
+    });
+    assert.equal(await page.locator('#window-controls').isVisible(),true);
+    for (const id of ['window-minimize','window-maximize','window-close']) await page.locator('#'+id).click();
+    assert.deepEqual(await page.evaluate(()=>window.nativeCalls),['minimize','toggle_maximize','close']);
+    await page.evaluate(()=>document.fonts.ready);
+    assert.equal(await page.evaluate(()=>document.fonts.check('16px framework7-core-icons')),true,'Framework7 icons must load under the production CSP');
+    assert.equal(await page.locator('#start-borrow').isDisabled(),true);
+    assert.match(await page.locator('#start-help').innerText(),/读取订阅/);
+    assert.equal(await page.locator('#leave-network').isEnabled(),true);
+    await page.locator('#notification-settings > a').click();
+    await page.locator('#notification-settings .toggle-icon').click();
+    await page.waitForFunction(()=>document.getElementById('notification-state').textContent==='关闭');
+    assert.equal(posts.filter(p=>p.path==='/api/online/connect'||p.path==='/api/network/leave').length,0,'Notification settings cannot start/stop networking');
+    await load();
+    assert.equal(await page.locator('#desktop-notifications').isChecked(),false,'Persisted setting must survive UI reload');
+    assert.equal(await page.locator('#app-rule-form,#lines,#update,#refresh').count(),0);
+    await page.locator('#subscription-url').fill('http://10.20.32.13:9182/#enroll=fixture-only');
+    await page.locator('#read-subscription').click();
+    await page.locator('.dialog').waitFor();
+    assert.match(await page.locator('.dialog').innerText(),/尚未启动入网/);
+    assert.doesNotMatch(await page.locator('.dialog').innerText(),/10\.20\.32\.13|private-lease/);
+    assert.equal(posts.filter(p=>p.path==='/api/online/connect').length,0);
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'知道了'}).click();
+    await page.locator('#subscription-history > a').click();
+    assert.match(await page.locator('#saved-subscriptions').innerText(),/物理出口订阅/);
+    await page.locator('#subscription-history > a').click();
+    await pause(400);
+    await page.waitForFunction(()=>document.getElementById('source-status-summary').textContent.includes('源网服务可达'));
+    assert.equal(sourceQueries,1,'Adding a subscription automatically checks sources exactly once');
+    assert.match(await page.locator('[data-source-status="grant-1"]').innerText(),/物理出口.*12.3/);
+    assert.match(await page.locator('[data-source-status="grant-2"]').innerText(),/源机代理出口/);
+    await page.evaluate(()=>{scheduleSourceStatus();scheduleSourceStatus();});
+    assert.equal(sourceQueries,1,'Background polling is throttled without duplicate probes');
+    assert.equal(posts.filter(p=>p.path==='/api/online/connect'||p.path==='/api/network/campus-logout').length,0,'Automatic source queries cannot connect or log out');
+    await page.locator('.page-content').evaluate(e=>{e.scrollTop=0});
+    assert.equal(await page.evaluate(()=>document.getElementById('status-title').getBoundingClientRect().top>=document.querySelector('.navbar').getBoundingClientRect().bottom),true,'Navbar must not cover the heading at scroll top');
+    await page.screenshot({path:path.join(root,'artifacts/paid-client-ui-ready-580.png')});
+    for(const id of ['start-borrow','leave-network']){
+      const rect=await page.locator('#'+id).evaluate(e=>({bottom:e.getBoundingClientRect().bottom,height:innerHeight}));
+      assert.ok(rect.bottom<=rect.height,`Main connection action ${id} should fit the first viewport (${rect.bottom}/${rect.height})`);
+    }
+    nodes[1].available=false;
+    await page.evaluate(()=>refresh());
+    assert.equal(await page.locator('input[name="source-node"][value="grant-2"]').isDisabled(),true,'Unavailable sources must stay disabled after refresh');
+    assert.match(await page.locator('.source-list label').filter({hasText:'第二源网'}).innerText(),/不可用|未就绪/);
+    nodes[1].available=true;
+    await page.evaluate(()=>refresh());
+    for(const viewport of [{width:420,height:560},{width:900,height:900}]){
+      await page.setViewportSize(viewport);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'No page overflow at supported desktop sizes');
+      await page.locator('#leave-network').scrollIntoViewIfNeeded();
+      assert.equal(await page.locator('#leave-network').isVisible(),true,'Exit must remain reachable in the minimum window');
+    }
+    await page.setViewportSize({width:580,height:820});
+    await page.locator('.source-list label').filter({hasText:'第二源网'}).click();
+    await page.waitForFunction(()=>document.getElementById('plan-speed').textContent.includes('50 Mbps'));
+    assert.match(await page.locator('#plan-speed').innerText(),/50 Mbps/);
+    stateDelay=700;
+    await page.evaluate(()=>{window.pendingRefresh=refresh();});
+    await pause(50);
+    await page.locator('#start-borrow').click();
+    await page.evaluate(()=>{for(let i=0;i<5;i++)document.getElementById('start-borrow').click()});
+    await page.waitForFunction(()=>document.getElementById('status-title').textContent==='已入网');
+    assert.match(await page.locator('#notice').innerText(),/连接已建立/);
+    stateDelay=0;
+    assert.equal(posts.find(p=>p.path==='/api/online/connect').body.grant_id,'grant-2');
+    assert.equal(posts.filter(p=>p.path==='/api/online/connect').length,1,'Repeated Start clicks must submit only one connection request');
+    assert.equal(await page.locator('.dialog').count(),0,'Start must proceed directly without a second confirmation');
+    assert.equal(await page.locator('#leave-network').isEnabled(),true);
+    await page.screenshot({path:path.join(root,'artifacts/paid-client-ui-connected-580.png')});
+    const firstSubscription=subscriptions.find(row=>row.selected).id;
+    const queriesBeforeReload=sourceQueries;
+    await load();
+    await page.waitForFunction(()=>document.getElementById('source-status-summary').textContent.includes('源网服务可达'));
+    assert.equal(sourceQueries,queriesBeforeReload+1,'Startup with saved subscription automatically queries source status');
+    await page.locator('#subscription-label').fill('备用套餐 <安全文本>');
+    const secondCode='PURE1-'+Buffer.from(JSON.stringify({v:1,url:'http://10.20.32.13:9182/#enroll=second-fixture-only'})).toString('base64url');
+    await page.locator('#subscription-url').fill(secondCode);
+    await page.locator('#read-subscription').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#saved-subscriptions li[data-subscription-id]').length===2);
+    assert.equal(await page.locator('#status-title').innerText(),'已入网','Adding another subscription must preserve current connection');
+    assert.equal(await page.locator('#saved-subscriptions script').count(),0);
+    const secondSubscription=subscriptions.find(row=>!row.selected).id;
+    const savedRow=id=>page.locator(`#saved-subscriptions li[data-subscription-id="${id}"]`);
+    const beforeFold=posts.length;
+    await page.locator('#subscription-history > a').click();
+    await page.waitForFunction(()=>document.querySelector('#subscription-history > a').getAttribute('aria-expanded')==='true');
+    await page.locator('#subscription-history > a').click();
+    await page.waitForFunction(()=>document.querySelector('#subscription-history > a').getAttribute('aria-expanded')==='false');
+    assert.equal(posts.length,beforeFold,'Folding subscription history must not change networking');
+    await page.locator('#subscription-history > a').click();
+    await page.waitForFunction(()=>document.querySelector('#subscription-history > a').getAttribute('aria-expanded')==='true');
+    await savedRow(secondSubscription).locator('[data-subscription-action="select"]').click();
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'取消'}).click();
+    await page.waitForFunction(()=>!document.querySelector('[data-subscription-action="select"]').disabled);
+    assert.equal(posts.filter(p=>p.path==='/api/online/subscriptions/select').length,0);
+    await savedRow(secondSubscription).locator('[data-subscription-action="select"]').click();
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'确认',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('status-title').textContent==='当前未入网');
+    assert.match(await savedRow(secondSubscription).innerText(),/当前订阅/);
+    assert.equal(await savedRow(firstSubscription).count(),1,'Switching must retain original subscription');
+    assert.equal(posts.filter(p=>p.path==='/api/online/connect').length,1,'Switching must not auto-connect');
+    await savedRow(firstSubscription).locator('[data-subscription-action="select"]').click();
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'确认',exact:true}).click();
+    await savedRow(firstSubscription).locator('strong').filter({hasText:'当前订阅'}).waitFor();
+    await page.locator('#start-borrow').click();
+    await page.waitForFunction(()=>document.getElementById('status-title').textContent==='已入网');
+    await savedRow(secondSubscription).locator('[data-subscription-action="remove"]').click();
+    assert.match(await page.locator('.dialog').innerText(),/当前订阅和入网连接保持/);
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'确认',exact:true}).click();
+    await savedRow(secondSubscription).waitFor({state:'detached'});
+    assert.equal(await page.locator('#status-title').innerText(),'已入网','Removing inactive subscription must preserve current network');
+    catalogFail=true;await page.evaluate(()=>refresh());
+    assert.equal(await page.locator('#start-borrow').isDisabled(),true);
+    assert.equal(await page.locator('#leave-network').isEnabled(),true);
+    await page.locator('#leave-network').click();
+    await page.waitForFunction(()=>document.getElementById('status-title').textContent==='当前未入网');
+    await page.waitForFunction(()=>document.getElementById('start-help').textContent.includes('订阅暂不可达'));
+    assert.match(await page.locator('#start-help').innerText(),/订阅暂不可达.*刷新/);
+    stateFail=true;await load();
+    assert.equal(await page.locator('#start-borrow').isDisabled(),true);
+    assert.equal(await page.locator('#leave-network').isEnabled(),true);
+    const before=posts.filter(p=>p.path==='/api/network/leave').length;
+    await page.locator('#leave-network').click();
+    await page.waitForFunction(()=>document.getElementById('leave-network').disabled===false);
+    assert.equal(posts.filter(p=>p.path==='/api/network/leave').length,before+1);
+    stateFail=false;catalogFail=false;recovering=true;
+    await load();
+    assert.equal(await page.locator('#leave-network').isEnabled(),true);
+    assert.equal(await page.locator('#start-borrow').isDisabled(),true);
+    recovering=false;nodes=[{...nodes[0],name:'很长的付费源网节点名称'.repeat(30)}];
+    await page.setViewportSize({width:390,height:844});
+    await load();
+    await page.locator('#access-settings > a').click();
+    await page.locator('#scan-wifi').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#wifi-networks li').length===21);
+    assert.match(await page.locator('#wifi-networks li').first().innerText(),/<安全文本>/);
+    assert.equal(await page.locator('#wifi-networks script').count(),0);
+    assert.equal(await page.locator('#wifi-networks').evaluate(e=>e.scrollHeight>e.clientHeight),true,'Wireless list must scroll');
+    assert.equal(await page.locator('#wifi-networks li').first().evaluate(e=>e.scrollWidth<=e.clientWidth+1),true,'Long SSID must wrap');
+    await page.locator('#check-access').click();
+    await page.waitForFunction(()=>document.getElementById('access-badge').textContent==='请查看接入检查');
+    assert.doesNotMatch(await page.locator('#guard-message').innerText(),/借网/);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+    assert.equal(await page.locator('.source-list .item-title').evaluate(e=>e.scrollWidth<=e.clientWidth+1),true);
+    await page.screenshot({path:path.join(root,'artifacts/paid-client-ui-long-390.png')});
+    const enrollmentCount=posts.filter(p=>p.path==='/api/online/subscriptions/add').length;
+    await pause(400);
+    await page.locator('#subscription-history > a').click();
+    await page.waitForFunction(()=>document.querySelector('#subscription-history > a').getAttribute('aria-expanded')==='true');
+    await page.locator('#refresh-subscription').click();
+    await page.waitForFunction(()=>document.getElementById('notice').textContent==='当前订阅已刷新。');
+    assert.equal(posts.filter(p=>p.path==='/api/online/subscriptions/add').length,enrollmentCount,'Refreshing registered subscription must not consume another enrollment token');
+    const connectCount=posts.filter(p=>p.path==='/api/online/connect').length;
+    await page.locator('#campus-logout').click();
+    await page.locator('.dialog').waitFor();
+    assert.match(await page.locator('.dialog').innerText(),/仅注销当前设备/);
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'取消'}).click();
+    await page.waitForFunction(()=>!document.getElementById('campus-logout').disabled);
+    assert.equal(posts.filter(p=>p.path==='/api/network/campus-logout').length,0);
+    await page.locator('#campus-logout').click();
+    await page.locator('.dialog.modal-in .dialog-button').filter({hasText:'确认 Logout'}).click();
+    await page.waitForFunction(()=>document.getElementById('campus-logout-message').textContent.includes('已验证个人校园账号下线'));
+    assert.equal(posts.filter(p=>p.path==='/api/network/campus-logout').length,1);
+    assert.deepEqual(posts.find(p=>p.path==='/api/network/campus-logout').body,{confirmed:true});
+    assert.equal(posts.filter(p=>p.path==='/api/online/connect').length,connectCount);
+    await page.locator('.dialog').waitFor({state:'detached'});
+    await page.waitForFunction(()=>!document.getElementById('campus-logout').disabled);
+    await page.locator('#campus-logout').scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(root,'artifacts/client-campus-logout-390.png')});
+    events=[{sequence:1,error:true,message:'连接热点后自动退出借网。'}];
+    await page.evaluate(async()=>{await refresh();displayNetworkEvents();});
+    assert.equal(await page.locator('#network-alert').isVisible(),true);
+    assert.doesNotMatch(await page.locator('#network-alert').innerText(),/借网/);
+    configured=false;subscriptions=[];events=[];enrollmentDelay=600;nodes=[{...nodes[0],name:'C201-4090 商业源网'}];
+    await load();
+    await page.locator('#subscription-url').fill('http://10.20.32.13:9182/#enroll=fixture-queue');
+    await page.locator('#read-subscription').click();await page.locator('#leave-network').click();
+    await page.waitForFunction(()=>document.getElementById('leave-network').disabled===false && document.getElementById('notice').textContent.startsWith('已退出入网'));
+    assert.equal(posts.at(-1).path,'/api/network/leave');
+    assert.deepEqual(errors,[]);
+    fs.writeFileSync(path.join(root,'artifacts/paid-client-ui-browser-result.json'),JSON.stringify({passed:true,headless:true,real_network_requests:false,checks:['subscribe-without-connect','direct-start-repeated-clicks-single-request','select-second-node','explicit-connect','offline-catalog-exit','unknown-state-exit','recovery-exit','long-text-and-390px','visible-alerts-and-paid-copy','registered-refresh-without-enrollment','manual-logout-cancel-confirm-no-connect','queued-exit-during-enrollment'],posts:posts.map(p=>p.path)},null,2));
+    console.log('Headless Framework7 fixture scenarios passed, including direct Start and repeat-click suppression; no real client or source-network requests.');
+  } finally {await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1});

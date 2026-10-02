@@ -148,9 +148,9 @@
   </div>
   <div class="card-footer text-secondary d-flex gap-3 flex-wrap align-items-center">
     <span>地址状态：ready 可用 · used 已兑换 · expired 已失效。销毁只针对未兑换地址；已兑换地址的历史不会被删除。</span>
-    <label class="form-label mb-0 d-flex align-items-center gap-2">补发开户入口
+    <label class="form-label mb-0 reissue-field">补发开户入口
       <input class="form-control form-control-sm" id="reissue-base" list="base-url-presets" type="url"
-             value="http://10.20.32.13:9182" style="width: 22rem"></label>
+             value="http://10.20.32.13:9182"></label>
   </div>
 </div>
 
@@ -185,7 +185,7 @@
 
 <datalist id="base-url-presets"></datalist>
 
-<dialog id="address-dialog" class="modal modal-blur" aria-labelledby="address-dialog-title">
+<dialog id="address-dialog" class="address-dialog" aria-labelledby="address-dialog-title">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header"><h2 class="modal-title" id="address-dialog-title">客户订阅地址</h2>
@@ -197,13 +197,14 @@
       </div>
       <div class="modal-footer">
         <button id="copy" class="btn btn-primary" type="button">复制地址</button>
+        <button id="address-dialog-txt" class="btn btn-outline-secondary" type="button">下载 .txt</button>
         <button id="address-dialog-cancel" class="btn btn-outline-secondary" type="button">关闭</button>
       </div>
     </div>
   </div>
 </dialog>
 
-<dialog id="reauth-dialog" class="modal modal-blur" aria-labelledby="reauth-dialog-title">
+<dialog id="reauth-dialog" class="address-dialog" aria-labelledby="reauth-dialog-title">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-header"><h2 class="modal-title" id="reauth-dialog-title">请重新验证管理员身份</h2></div>

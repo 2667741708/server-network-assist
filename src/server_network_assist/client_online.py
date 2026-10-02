@@ -420,7 +420,14 @@ class OnlineServiceClient:
         lease_id = lease_id or (current or {}).get("id")
         if not lease_id:
             raise ValueError("当前没有可续租的商业租约")
-        result = self.request("POST", "/client/v1/lease/renew", {"lease_id": lease_id})
+        payload = {"lease_id": lease_id}
+        if (current and current.get("id") == lease_id and
+                isinstance(current.get("token"), str) and current["token"]):
+            # Unbounded grants keep their existing bearer token. The device
+            # signature covers this value; the server verifies it against the
+            # stored digest and returns it unchanged without rotating it.
+            payload["current_token"] = current["token"]
+        result = self.request("POST", "/client/v1/lease/renew", payload)
         lease = result.get("lease")
         if not isinstance(lease, dict) or not isinstance(lease.get("id"), str):
             raise ValueError("服务端续租响应无效")

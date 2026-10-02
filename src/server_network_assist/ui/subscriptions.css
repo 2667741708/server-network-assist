@@ -46,6 +46,9 @@ p,.business-row,.card-title,.page-title,.source span,legend,label,.text-wrap-any
 .source span,.business-row p{white-space:pre-wrap}
 #sources,#egress-sources,#egress-grants{max-height:480px;overflow:auto}
 #subscription-url{white-space:pre-wrap;overflow-wrap:anywhere;resize:vertical;min-height:120px}
+/* 补发开户入口：固定 22rem 的输入框会在窄屏撑宽整个页面 */
+.reissue-field{display:flex;align-items:center;gap:.5rem;flex:1 1 22rem;min-width:0}
+.reissue-field input{margin-top:0;flex:1 1 12rem;min-width:0;width:auto}
 #result,#service-form,#service-detail,#customer-subscription-form,#egress-form{scroll-margin-top:1rem}
 button.btn{white-space:normal;max-width:100%}button:disabled{cursor:not-allowed}
 :focus-visible{outline:2px solid var(--tblr-primary);outline-offset:3px}

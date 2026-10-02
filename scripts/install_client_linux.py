@@ -35,7 +35,7 @@ def main():
         '[Service]', 'Type=simple', f'Environment=SNA_CLIENT_UI_UID={account.pw_uid}',
         'ExecStart=' + systemd_quote(sys.executable) + ' -m server_network_assist.client --serve --data ' + systemd_quote(data),
         'Restart=on-failure', 'RestartSec=3', 'NoNewPrivileges=false', 'PrivateTmp=true',
-        'ProtectHome=true', 'ProtectSystem=strict', 'ReadWritePaths=' + str(data), '',
+        'ProtectHome=true', 'ProtectSystem=strict', 'ReadWritePaths=' + str(data) + ' /etc/wireguard', '',
         '[Install]', 'WantedBy=multi-user.target', '']), encoding='utf-8')
     os.chmod(service, 0o644)
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
