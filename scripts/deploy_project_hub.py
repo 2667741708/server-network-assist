@@ -120,9 +120,14 @@ def deploy(source, expected_sha, dry_run):
     if hashlib.sha256(original).hexdigest() != expected_sha:
         raise RuntimeError('Caddy configuration changed since inspection; inspect again before deployment')
     text = original.decode()
-    if not text.startswith('whm12.art {'):
+    # Caddy permits a global options block before the named site. Validate the
+    # exact site header without assuming it is the first line of the file.
+    site_header = re.search(r'(?m)^whm12[.]art[ \t]*\{[ \t]*$', text)
+    if site_header is None:
         raise ValueError('Unexpected domain configuration')
     if BEGIN in text:
+        if text.count(BEGIN) != 1 or text.count(END) != 1 or text.index(BEGIN) < site_header.end():
+            raise ValueError('Unexpected project route ownership markers')
         start = text.index(BEGIN); finish = text.index(END,start)+len(END)
         updated = text[:start] + block.strip() + text[finish:]
     else:

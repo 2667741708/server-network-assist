@@ -1,4 +1,11 @@
 {
+  "remote-server-manage": {
+    "title": "RSM 与 RDC：让 ChatGPT 连接自己的服务器",
+    "summary": "六台 Windows/Linux 主机的实际接入与验收，以及 PowerShell、代理、后台服务、OAuth 和 Cloudflare 的分层排错。",
+    "category": "远程管理与 MCP",
+    "kind": "故障复盘与教程",
+    "featured": true
+  },
   "server-network-assist": {
     "title": "让 Windows 与 Ubuntu，共用一条网络",
     "summary": "从原生应用与 WSL 的联网差异出发，介绍跨平台网络共享、代理选择和可回退设计。",

@@ -100,6 +100,13 @@ const isActive = (path: string) => {
             快速疑问
           </a>
         </li>
+        {
+          ["/", "/catalog"].includes(currentPath) && (
+            <li class="col-span-2">
+              <a href="/p2p/downloads/" data-astro-reload>P2P 下载</a>
+            </li>
+          )
+        }
         <li class="col-span-2">
           <a
             href={getRelativeLocaleUrl(locale, "about")}
