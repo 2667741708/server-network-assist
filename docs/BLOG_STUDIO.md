@@ -15,6 +15,11 @@
 
 ## 本地命令
 
+公开仓库元数据在 `site/projects/catalog.json`；维护者明确公开的文档入口在
+`site/projects/documentation.json`，例如源码私有的 RSM。博客与 CMS 合并两者展示，
+旧项目生成器仍只处理公开仓库，并保留拒绝私有仓库的检查。同步 GitHub 仓库清单不会
+删除这些独立维护的文档入口；私有项目链接应指向公开使用说明，不伪称可查看源码。
+
 在 `site/blog` 执行：
 
 ```text

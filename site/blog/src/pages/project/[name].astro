@@ -5,7 +5,7 @@ import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import Card from "@/components/Card.astro";
 import { getSortedPosts } from "@/utils/getSortedPosts";
-import catalog from "../../../../projects/catalog.json";
+import catalog from "@/utils/projectCatalog";
 export function getStaticPaths() { return catalog.projects.map(project => ({params:{name:project.name},props:{project}})); }
 const { project } = Astro.props;
 const posts = getSortedPosts(await getCollection("posts")).filter(p => p.data.project === project.name);

@@ -1,5 +1,5 @@
 ---
-import catalog from "../../../projects/catalog.json";
+import catalog from "@/utils/projectCatalog";
 export function getStaticPaths() {
   return catalog.projects.map(project => ({ params: { name: project.name } }));
 }

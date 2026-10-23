@@ -41,6 +41,10 @@ scripts = Scripts()
 for html in site.rglob('*.html'):
     scripts.feed(html.read_text(encoding='utf-8'))
 catalog = json.loads((ROOT/'site/projects/catalog.json').read_text(encoding='utf-8'))
+documentation = json.loads((ROOT/'site/projects/documentation.json').read_text(encoding='utf-8'))
+catalog['projects'] = [*documentation['projects'], *catalog['projects']]
+if len({p['name'] for p in catalog['projects']}) != len(catalog['projects']):
+    raise ValueError('Duplicate project documentation route')
 manifest = dict(format=2, projects=len(catalog['projects']),
                 paths=[p['name'] for p in catalog['projects']],
                 script_hashes=sorted(scripts.hashes),

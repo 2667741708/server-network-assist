@@ -1,0 +1,16 @@
+{
+  "projects": [
+    {
+      "name": "remote-server-manage",
+      "url": "https://mcp.whm12.art/host/start",
+      "description": "RSM：通过 HTTPS MCP 管理自己的远程主机。这里公开接入方法、RDC 对照和排错记录；产品源码仍为私有。",
+      "language": "Python",
+      "updated": "2026-10-23T16:00:00Z",
+      "fork": false,
+      "archived": false,
+      "homepage": "https://mcp.whm12.art/host/start",
+      "topics": ["mcp", "rsm", "remote-management"],
+      "private": true
+    }
+  ]
+}

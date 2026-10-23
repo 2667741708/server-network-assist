@@ -49,6 +49,8 @@ for (const name of await readdir(dist)) {
   }
 }
 const catalog = JSON.parse(await readFile(path.join(root,'../projects/catalog.json'),'utf8'));
+const documentation = JSON.parse(await readFile(path.join(root,'../projects/documentation.json'),'utf8'));
+catalog.projects = [...documentation.projects, ...catalog.projects];
 const templates = [
   ['tutorials','实操教程','## 你将完成什么\n\n## 环境与机器分工\n\n## 操作步骤\n\n## 预期结果与验证\n\n## 常见问题与恢复\n'],
   ['introductions','项目介绍','## 谁需要这个项目\n\n## 一个实际例子\n\n## 如何开始\n\n## 当前边界\n'],
