@@ -1,4 +1,10 @@
 {
+  "ysunetlogin_openwrt": {
+    "title": "燕山大学校园网：自动维持登录与掉线重连",
+    "summary": "定期检测校园网认证状态，掉线后自动重新登录。支持 Windows 本机、校内服务器与 OpenWrt 路由器，并说明心跳配置和使用边界。",
+    "category": "校园网与网络自愈",
+    "kind": "项目介绍与使用指南"
+  },
   "remote-server-manage": {
     "title": "RSM 与 RDC：让 ChatGPT 连接自己的服务器",
     "summary": "六台 Windows/Linux 主机的实际接入与验收，以及 PowerShell、代理、后台服务、OAuth 和 Cloudflare 的分层排错。",
