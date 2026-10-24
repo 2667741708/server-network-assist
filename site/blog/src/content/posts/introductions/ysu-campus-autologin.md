@@ -19,6 +19,18 @@ verifiedAt: "2026-10-24 核对源码与模拟心跳生命周期测试，未在�
 
 **这个项目的重点是让燕山大学校园网自动维持登录：登录成功后自动启动心跳，定期检查认证与联网状态，在确认异常后重新登录，并再次核实恢复结果。** 仓库名为 `ysunetlogin_openwrt`，现在也提供 Windows 桌面程序和 Python 命令行入口。
 
+## 最简单的使用方式：下载一个文件
+
+普通用户直接下载 [netlogin.pyz 单文件命令包](https://github.com/2667741708/ysunetlogin_openwrt/releases/latest/download/netlogin.pyz)，不用解压，也不用手工下载多个源码文件。在下载目录执行：
+
+```bash
+python netlogin.pyz login
+```
+
+按提示输入账号、隐藏的密码和运营商，登录成功后自动启动后台心跳。Linux 可用 python3；需要已安装 Python，认证加密依赖见 [安装说明](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/docs/CLI_INSTALL.md)。
+
+仓库里的 netlogin.py 是源码入口，完整运行还依赖其他模块，不能只下载它。需要修改代码时才下载整套源码；只想使用时选发布页 Assets 中的 netlogin.pyz。
+
 ## OpenWrt 是什么意思？
 
 OpenWrt 是主要用于路由器等网络设备的开源 Linux 操作系统。可以把它理解为“能安装软件、运行脚本的路由器系统”。普通路由器负责连接和转发网络，装有 OpenWrt 的兼容设备还可以在后台执行校园网认证与检查脚本。
@@ -41,7 +53,7 @@ OpenWrt 是主要用于路由器等网络设备的开源 Linux 操作系统。�
 
 ## Windows 电脑如何开始？
 
-只维护自己的电脑时，推荐先阅读 [Windows 本机使用与配置](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/WINDOWS_LOCAL_SETUP.md)，再从 [项目 Releases](https://github.com/2667741708/ysunetlogin_openwrt/releases) 选择发布包。
+只维护自己的电脑时，推荐先阅读 [Windows 本机使用与配置](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/docs/WINDOWS_LOCAL_SETUP.md)，再从 [项目 Releases](https://github.com/2667741708/ysunetlogin_openwrt/releases) 选择发布包。
 
 1. 完整解压发布包，启动 `YSU-Netlogin-Healing-Manager.exe`。
 2. 在“校园网账号”页保存账号、密码和已开通的运营商。
@@ -55,7 +67,7 @@ OpenWrt 是主要用于路由器等网络设备的开源 Linux 操作系统。�
 
 ### 下载的 EXE 和最新源码可能不同
 
-本文的自动启用行为对应 2026-10-24 更新后的源码与重建程序（2.2.0）。旧 2.1.4 EXE 不会自动获得新行为。运营商核验、网卡直连与心跳变化，应以 [更新说明](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/RELEASE_NOTES.md) 为准；旧 EXE 需要重新构建才能包含这些源码变化。
+本文的自动启用行为对应 2026-10-24 更新后的源码与重建程序（2.2.0）。旧 2.1.4 EXE 不会自动获得新行为。运营商核验、网卡直连与心跳变化，应以 [更新说明](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/docs/RELEASE_NOTES.md) 为准；旧 EXE 需要重新构建才能包含这些源码变化。
 
 ## 命令行与 OpenWrt 路由器怎么选？
 
@@ -82,9 +94,9 @@ python netlogin.py "学号" "校园网密码" 1
 
 运营商编号为：`0` 校园网、`1` 中国移动、`2` 中国联通、`3` 中国电信。必须选择账号已开通的服务。**新版本中，这条命令登录成功后就会自动启动独立后台心跳，不需要手动开启。** 命令中的密码也可能留在终端历史中，个人电脑日常使用可优先选择桌面程序。
 
-Windows 使用最新源码时，应完整保留相关模块，不要只替换 `netlogin.py`。具体环境依赖、网卡选择与配置示例见 [校园网直连使用说明](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/CAMPUS_DIRECT_SETUP.md)。
+Windows 使用最新源码时，应完整保留相关模块，不要只替换 `netlogin.py`。具体环境依赖、网卡选择与配置示例见 [校园网直连使用说明](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/docs/CAMPUS_DIRECT_SETUP.md)。
 
-OpenWrt 方案同样使用登录后自动启动的自愈心跳。旧版 `daemon.sh` 中的夜间暂停时段、cron 和失败重启逻辑已退出默认流程；现在无需设置重连时段，也不会因认证失败重启路由器。不同固件的 Python 和加密依赖可能不同，应完整保留源码模块，具体步骤见 [README 安装与配置](https://github.com/2667741708/ysunetlogin_openwrt#安装指南)。
+OpenWrt 方案同样使用登录后自动启动的自愈心跳。旧版 `daemon.sh` 中的夜间暂停时段、cron 和失败重启逻辑已退出默认流程；现在无需设置重连时段，也不会因认证失败重启路由器。不同固件的 Python 和加密依赖可能不同，应完整保留源码模块，具体步骤见 [README 安装与配置](https://github.com/2667741708/ysunetlogin_openwrt#最简单的使用方式)。
 
 ### 退出 SSH 后还会自动重连吗？
 
@@ -98,7 +110,7 @@ python netlogin.py logout
 
 这会停止维护、删除保存的重连凭据并下线，不必先去关闭心跳。只想查看后台状态，可运行 `python netlogin.py heartbeat-status`；只停维护、保留当前会话用 `heartbeat-stop`。高级的一次性认证可追加 `--once`，日常使用无需这个参数。
 
-Linux 凭据保存在当前用户私有目录，Windows 命令行使用当前用户 DPAPI 加密。后台进程参数和状态输出不包含密码。完整源码及自包含命令包的说明见 [命令安装文档](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/CLI_INSTALL.md)。
+Linux 凭据保存在当前用户私有目录，Windows 命令行使用当前用户 DPAPI 加密。后台进程参数和状态输出不包含密码。完整源码及自包含命令包的说明见 [命令安装文档](https://github.com/2667741708/ysunetlogin_openwrt/blob/main/docs/CLI_INSTALL.md)。
 
 ## 为什么“认证成功”还要检查运营商？
 
