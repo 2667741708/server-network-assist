@@ -1,7 +1,8 @@
 ---
 title: "RDC 与 RSM 六台主机接入复盘：安装、配对、代理和真实验收"
-description: "记录 Windows 与 Ubuntu 六台主机接入 RDC、RSM 的成功路径，分清设备配对、ChatGPT OAuth、服务身份与全盘范围，并解释官方命令之外补上的环境配置。"
+description: "先按步骤在 ChatGPT 添加 RSM 插件、填写 MCP 地址并完成登录授权，再安装主机 Agent；附 RDC 入口对照、六台主机接入记录和代理排错。"
 pubDatetime: 2026-10-23T16:00:00Z
+modDatetime: 2026-11-12T16:00:00Z
 author: "2667741708"
 project: "remote-server-manage"
 articleType: "故障复盘"
@@ -11,6 +12,95 @@ featured: true
 draft: false
 tags: [RSM, RDC, MCP, Windows, Ubuntu, 代理, 故障复盘]
 ---
+
+## 先在 ChatGPT 中连接 RSM 插件
+
+先完成 **ChatGPT 添加插件 → 登录 RSM 并授权 → 在对话中选中 RSM**。随后再到目标电脑安装 Agent，把电脑配对到同一个 RSM 账户。这样你会先得到一个可用的插件连接，再让设备出现在里面。
+
+本节于 **2026-11-13** 按 OpenAI 当前插件文档更新。你需要自己的 ChatGPT 账户和 RSM 账户；两者分别登录，密码不会自动互通。RSM 账户还没有设备也可以先连接，空设备列表属于下一步安装与配对要解决的事。
+
+### 第 1 步：打开 ChatGPT 的插件页面
+
+在电脑浏览器登录你准备使用的 ChatGPT 账户，然后打开 [ChatGPT 插件页](https://chatgpt.com/plugins)。如果属于团队工作区，先确认右上角或侧栏显示的是你要使用的工作区。
+
+先查看已安装或自己创建的插件：**如果已经有 RSM，打开它并连接你的 RSM 账户，直接继续第 4 步。** 已有正常连接时，继续第 5 步即可，不必重复创建同名插件。RSM 是否出现在你的页面，取决于该账户或工作区是否已经安装、创建或获准使用它；不能假定搜索公共目录就一定能找到。
+
+### 第 2 步：没有 RSM 时，添加自定义 MCP 服务
+
+在插件页选择 **「＋」→「Add custom MCP server」（添加自定义 MCP 服务器）**。当前官方文档从这个入口创建插件；菜单名称或可见性受账户和工作区权限影响。
+
+打开表单后，按下表填写：
+
+| 页面字段 | 填写内容 |
+| --- | --- |
+| 名称 / Name | `RSM`，也可以命名为“RSM 远程服务器管理” |
+| 描述 / Description | 可选，例如“管理我在 RSM 中已授权的电脑和服务器” |
+| 连接方式 / Connection | 使用公网 Server URL；本文这条连接不需要选择 Tunnel |
+| 服务器地址 / Server URL | `https://mcp.whm12.art/host/mcp` |
+| 身份验证 / Authentication | **OAuth** |
+| OAuth 客户端 | 使用动态客户端注册（DCR）；若界面显示可选的 Client ID / Client Secret，使用动态注册时留空 |
+
+**可直接复制的 RSM MCP 地址：**
+
+```text
+https://mcp.whm12.art/host/mcp
+```
+
+请保留末尾的 `/host/mcp`。`/host/login` 是网页登录页，`/host/start` 是教程页，`/admin/mcp` 是另一套私人管理入口，都不要填到本表的 Server URL 中。
+
+RSM 当前公开了动态注册地址，普通接入者不需要向维护者索要 API Key，也不要把 RSM 密码、Gmail 应用密码填进 Client Secret。若表单只允许填写固定客户端凭据、不能选择动态注册，应先核对创建入口与认证配置，不能编造一组密钥继续。
+
+### 第 3 步：创建并安装这个插件
+
+核对名称、地址和 OAuth，阅读页面的连接提示，确认你信任这个服务后，选择 **「Create as a plugin」（创建为插件）**。ChatGPT 会连接 MCP 服务并发现它提供的工具。
+
+创建成功后，在个人插件或当前工作区找到 RSM。**如果页面仍显示安装按钮或「＋」，先安装它**；创建了条目不等于已经能在对话中调用。若创建过程已经要求登录 RSM，按下一步完成；若稍后才出现“连接账户”，也按同一流程操作。
+
+### 第 4 步：登录 RSM，完成 OAuth 同意
+
+点击插件中的连接账户入口，浏览器会进入 RSM 的登录或授权页面。登录**准备接收这些设备的 RSM 账户**；还没有账户时，先在 [RSM 登录页](https://mcp.whm12.art/host/login)进入注册流程，再回到 ChatGPT 发起的这次连接。
+
+授权页上核对三件事：应用是 **ChatGPT**，RSM 用户名是你自己的，申请的操作范围符合你的需要。只查询设备需要 `devices:read`；后续要执行命令、管理设备、读写文件，还需要对应的 `devices:exec`、`devices:manage`、`files:read`、`files:write`。以页面实际申请的范围为准，确认后点击页面的允许访问按钮。
+
+OAuth 的意思是“同意 ChatGPT 使用这部分 RSM 能力”。它不会自动赋予每台电脑 root / SYSTEM 权限，也不会代替设备上的目录与操作授权。若只批准了设备查询，连接成功后仍不能据此执行命令或写文件。
+
+**成功标志是返回 ChatGPT，并在 RSM 插件下看到已连接的账户。** 仅手动打开 RSM 首页并登录，还没有完成这次 OAuth。若授权后没有返回，回到 ChatGPT 的原连接流程重试；不要靠反复打开 `/host/` 首页代替授权回调，也不要把密码或验证码发到聊天中。
+
+### 第 5 步：新建对话，明确选中 RSM
+
+回到 ChatGPT 主页，按当前插件界面进入 **Work（工作）** 并新建对话。在输入框键入 **`@`**，从列表中选择 **RSM**，再发送下面这段首次检查请求：
+
+```text
+请使用我刚连接的 RSM 插件。
+先调用 who_am_i，报告当前 RSM 用户名；
+再调用 device_list，列出这个账户的设备、别名和在线状态。
+这一步只检查连接，不执行命令，不写入文件。
+```
+
+检查实际工具结果：用户名应与你刚才授权的 RSM 账户一致；已配对的主机应出现在列表中。**列表为空但账户正确**，说明可以继续安装 Agent；**用户名不对**，则回到插件的已连接账户中选择或重新连接正确账户。不要只根据插件标题或对话中的文字判断身份。
+
+如果 `@` 列表没有 RSM，先回插件页确认已经安装，且当前对话与插件属于同一个工作区。若连“添加自定义 MCP 服务器”或 Work 入口都不可用，需先核对当前产品界面、账户可用功能和工作区权限；重装电脑上的 Agent 不会让这些入口出现。
+
+### 第 6 步：再把目标主机放进这个账户
+
+现在完成的是 **ChatGPT → RSM 服务** 的连接。接下来去要被管理的电脑安装 Agent，在配对网页登录**刚才同一个 RSM 账户**，核对设备、目录与权限，保持 Agent 运行。
+
+继续阅读下方的 [RSM 主机安装与配对步骤](#rsm-成功路径设备配对和-chatgpt-授权分别完成)。完成后回到选中了 RSM 的对话，再调用 `device_list`；看到目标主机在线，才继续核对 `whoami` / `hostname` 和后面的读写执行验收。
+
+### 如果你要连接的是 RDC
+
+RDC 是另一项服务，需要单独添加或安装插件并授权。仍从 ChatGPT 插件页开始，创建自定义 MCP 连接时使用下面这组字段，不要与 RSM 混填：
+
+| 字段 | RDC 填写值 |
+| --- | --- |
+| 名称 | `RDC` 或 `Remote Desktop Commander` |
+| Server URL | `https://mcp.desktopcommander.app/mcp` |
+| Authentication | OAuth |
+| 登录账户 | 你自己的 RDC 官方服务账户 |
+
+安装后在新对话中 `@RDC`，先让它报告当前服务账户并列出已配对设备。电脑上运行官方 `remote` 命令、用设备码配对，是让机器进入 **RDC 账户**；它不会同时进入 RSM。下方 [RDC 主机接入步骤](#rdc-成功路径官方命令之后还要做什么)说明如何完成设备这一端。
+
+接入入口依据：[OpenAI 插件连接文档](https://developers.openai.com/plugins/deploy/connect-chatgpt)、[OpenAI 插件快速开始](https://developers.openai.com/plugins/quickstart)、[自定义 MCP 与 OAuth 选项](https://developers.openai.com/api/docs/guides/custom-mcp-server)；RDC 地址依据[官方仓库](https://github.com/desktop-commander/remote-desktop-commander)。下面保留此前六台主机的接入复盘与排错记录，首次使用可先按上面的六步操作。
 
 ## 先回答：为什么复制官方命令失败，调整后却成功了
 
@@ -161,6 +251,8 @@ python3 -S agent_runner.py auth login
 ### 3. 保持 Agent 在线，再连接 ChatGPT
 
 在 RSM 账户中先确认设备在线；之后在 ChatGPT 的插件或连接器设置中，使用站点提供的 RSM MCP 地址并完成 OAuth。与网页授权有关的地址不能只替换域名，`issuer`、资源地址和回调必须与服务配置匹配。
+
+如果已经完成本文开头的 ChatGPT 连接流程，这里直接回到原对话查询设备即可，不必重新创建插件或重复授权。
 
 这次批准的是 `devices:read`、`devices:exec`、`devices:manage`、`files:read`、`files:write` 五项范围。它们是明确授权的结果，不是任何连接器都应默认申请的权限。
 
