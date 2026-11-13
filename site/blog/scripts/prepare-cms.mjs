@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { mkdir, readdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { build } from 'esbuild';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const admin = path.join(root, 'public/admin');
 
@@ -42,6 +43,12 @@ const displayUrl = env('BLOG_DISPLAY_URL', 'https://whm12.art/projects/');
 
 await copyFile(path.join(root,'public/images/windows-proxy-diagnosis.png'), path.join(root,'public/network-assist-og.png'));
 await mkdir(path.join(admin, 'vendor'), { recursive: true });
+await build({
+  entryPoints: [path.join(root, 'server/email_auth/email-backend.jsx')],
+  bundle: true, format: 'iife', minify: true,
+  outfile: path.join(admin, 'email-backend.js'),
+  define: { 'process.env.NODE_ENV': '"production"' },
+});
 const dist = path.join(root, 'node_modules/decap-cms/dist');
 for (const name of await readdir(dist)) {
   if (name.endsWith('.decap-cms.js') || ['decap-cms.js','decap-cms.js.LICENSE.txt','cms.css'].includes(name) || name.endsWith('.wasm')) {
@@ -79,7 +86,7 @@ const config = {
     {name:'author',label:'作者',widget:'string',default:'2667741708'},
     {name:'pubDatetime',label:'发布日期',widget:'datetime',format:'YYYY-MM-DDTHH:mm:ss[Z]',picker_utc:true},
     {name:'modDatetime',label:'修改日期',widget:'datetime',format:'YYYY-MM-DDTHH:mm:ss[Z]',picker_utc:true,required:false},
-    {name:'draft',label:'保留为草稿（正式构建不显示）',widget:'boolean',default:true,hint:'准备正式发布时关闭此项；随后仍需通过编辑工作流发布。'},
+    {name:'draft',label:'保留为草稿（正式构建不显示）',widget:'boolean',default:true,hint:'准备正式发布时关闭此项并保存；网站会自动构建更新。'},
     {name:'featured',label:'首页推荐',widget:'boolean',default:false},
     {name:'testedVersion',label:'适用版本',widget:'string',required:false},
     {name:'verifiedAt',label:'实际验证日期与范围',widget:'string',required:false},

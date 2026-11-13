@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.sqlite*
+*.key
+*.token
+*client.json
+config.json
+smtp.json
+*.password
