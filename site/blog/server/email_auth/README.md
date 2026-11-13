@@ -10,6 +10,8 @@ Google Web 客户端的回调必须为 `https://whm12.art/projects/email-auth/go
 
 运行服务：`python -m uvicorn app:create_app --factory --host 127.0.0.1 --port 9191 --no-access-log --no-proxy-headers`。Caddy 保留 `/projects/email-auth/` 前缀转发到该端口，并覆盖 X-Real-IP 为真实客户端地址。只对外开放 HTTPS。
 
+如果服务器无法直连 Google 的 HTTPS 验证接口，可在私有配置中设置 https_proxy 指向可信的本机 HTTP 代理。代理仅负责 CONNECT 转发，Google token 和证书请求仍执行标准 TLS 证书校验。
+
 前端从 `/projects/admin/` 检查会话，未登录跳转统一登录页；`?login=github` 可继续使用原有 GitHub 登录。通过邮箱登录使用简单发布模式，关闭“保留为草稿”后保存才能显示在公开网站。
 
 验证：在本目录安装 requirements.txt 和 pytest，执行 `python -m pytest -q test_app.py`。测试使用临时数据库、模拟仓库和模拟邮件，不发送真实邮件、不更改真实仓库。

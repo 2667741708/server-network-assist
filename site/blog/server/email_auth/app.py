@@ -47,6 +47,7 @@ class Settings:
     origin: str = 'https://whm12.art'
     repository: str = '2667741708/server-network-assist'
     branch: str = 'main'
+    https_proxy: str | None = None
 
     @classmethod
     def load(cls):
@@ -395,7 +396,7 @@ def create_app(settings=None, repository=None, mailer=send_code):
         query = {'client_id': config['client_id'], 'redirect_uri': settings.origin + PREFIX + '/google/callback',
                  'response_type': 'code', 'scope': 'openid email profile', 'state': state, 'nonce': nonce,
                  'code_challenge': challenge, 'code_challenge_method': 'S256',
-                 'login_hint': settings.google_email, 'prompt': 'select_account'}
+                 'login_hint': settings.google_email}
         response = RedirectResponse('https://accounts.google.com/o/oauth2/v2/auth?' + urlencode(query), 302)
         response.set_cookie(PREAUTH_COOKIE, browser, max_age=600, path=PREFIX,
                             secure=True, httponly=True, samesite='lax')
@@ -416,7 +417,7 @@ def create_app(settings=None, repository=None, mailer=send_code):
         if request.query_params.get('error') or not request.query_params.get('code'):
             raise HTTPException(400, 'Google 登录已取消，请返回后台重试')
         try:
-            with httpx.Client(timeout=20, trust_env=False) as client:
+            with httpx.Client(timeout=20, trust_env=False, proxy=settings.https_proxy) as client:
                 reply = client.post('https://oauth2.googleapis.com/token', data={
                     'grant_type': 'authorization_code', 'client_id': config['client_id'],
                     'client_secret': config['client_secret'], 'code': request.query_params['code'],
@@ -425,11 +426,17 @@ def create_app(settings=None, repository=None, mailer=send_code):
                 token = reply.json()['id_token']
             from google.auth.transport.requests import Request as GoogleRequest
             from google.oauth2.id_token import verify_oauth2_token
-            claims = verify_oauth2_token(token, GoogleRequest(), config['client_id'])
+            import requests
+            with requests.Session() as google_session:
+                google_session.trust_env = False
+                if settings.https_proxy:
+                    google_session.proxies['https'] = settings.https_proxy
+                claims = verify_oauth2_token(token, GoogleRequest(session=google_session), config['client_id'])
             if (claims.get('nonce') != row['nonce'] or claims.get('email_verified') is not True
                     or str(claims.get('email', '')).lower() != settings.google_email):
                 raise ValueError('Not an allowed verified identity')
-        except Exception:
+        except Exception as error:
+            logging.getLogger('blog-auth').warning('Google login verification failed: %s', type(error).__name__)
             raise HTTPException(403, 'Google 身份验证失败或此账号没有写作权限')
         response = RedirectResponse('/projects/admin/', 302)
         set_session(response, store.new_session(settings.google_email, 'google'))

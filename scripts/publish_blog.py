@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -20,7 +21,13 @@ CADDY = Path('/etc/caddy/Caddyfile')
 
 
 def run(args, timeout=40):
-    result = subprocess.run(args, check=True, capture_output=True, timeout=timeout)
+    environment = os.environ.copy()
+    if args[0] == 'gh':
+        environment['GH_TOKEN'] = Path('/etc/blog-email-auth/github.token').read_text().strip()
+    result = subprocess.run(args, capture_output=True, timeout=timeout, env=environment)
+    if result.returncode:
+        detail = result.stderr.decode(errors='replace')[-2400:]
+        raise RuntimeError(Path(args[0]).name + ' failed: ' + detail)
     return result.stdout
 
 
